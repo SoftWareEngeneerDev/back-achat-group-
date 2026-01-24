@@ -8,3 +8,37 @@
 /node_modules
 npm-debug.log
 yarn-error.log
+
+
+# Build
+build/
+
+# Environment
+.env.local
+.env.production
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+
+# Uploads (temporaire)
+uploads/*
+!uploads/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+prisma/migrations/*
+!prisma/migrations/.gitkeep

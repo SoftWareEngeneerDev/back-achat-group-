@@ -1,0 +1,385 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Role {
+  VISITOR
+  MEMBER
+  SUPPLIER
+  ADMIN
+}
+
+enum GroupStatus {
+  OPEN      // Groupe ouvert, en cours de formation
+  CLOSED    // Groupe fermé, seuil atteint
+  COMPLETED // Groupe terminé, livraison effectuée
+  FAILED    // Groupe échoué, délai expiré sans atteindre le seuil
+  CANCELLED // Groupe annulé par admin
+}
+
+enum OrderStatus {
+  PENDING   // En attente de paiement
+  PAID      // Payé
+  PROCESSING // En cours de traitement
+  SHIPPED   // Expédié
+  DELIVERED // Livré
+  CANCELLED // Annulé
+  REFUNDED  // Remboursé
+}
+
+enum PaymentStatus {
+  PENDING   // En attente
+  COMPLETED // Complété
+  FAILED    // Échoué
+  REFUNDED  // Remboursé
+}
+
+enum PaymentMethod {
+  ORANGE_MONEY
+  MOOV_MONEY
+  LIGDICASH
+  CARD
+}
+
+enum NotificationType {
+  EMAIL
+  SMS
+  PUSH
+  WHATSAPP
+}
+
+enum SupplierStatus {
+  PENDING   // En attente de validation
+  APPROVED  // Validé
+  REJECTED  // Rejeté
+  SUSPENDED // Suspendu
+}
+
+enum ProductStatus {
+  DRAFT     // Brouillon
+  PENDING   // En attente de validation
+  APPROVED  // Approuvé et publié
+  REJECTED  // Rejeté
+  ARCHIVED  // Archivé
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+// Utilisateurs
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  phone         String?   @unique
+  password      String
+  firstName     String
+  lastName      String
+  role          Role      @default(MEMBER)
+  avatar        String?
+  address       String?
+  city          String?   @default("Ouagadougou")
+  isVerified    Boolean   @default(false)
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  groupMembers    GroupMember[]
+  orders          Order[]
+  reviews         Review[]
+  notifications   Notification[]
+  supplier        Supplier?
+  refreshTokens   RefreshToken[]
+  otpCodes        OtpCode[]
+
+  @@index([email])
+  @@index([phone])
+  @@map("users")
+}
+
+// Tokens de rafraîchissement
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// Codes OTP pour validation
+model OtpCode {
+  id        String   @id @default(uuid())
+  code      String
+  userId    String
+  type      String   // 'email' ou 'sms'
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("otp_codes")
+}
+
+// Fournisseurs
+model Supplier {
+  id              String          @id @default(uuid())
+  userId          String          @unique
+  companyName     String
+  businessNumber  String?         // SIRET ou équivalent
+  description     String?         @db.Text
+  logo            String?
+  status          SupplierStatus  @default(PENDING)
+  validatedAt     DateTime?
+  validatedBy     String?         // Admin ID
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("suppliers")
+}
+
+// Catégories de produits
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?   @db.Text
+  icon        String?
+  image       String?
+  isActive    Boolean   @default(true)
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  products Product[]
+
+  @@map("categories")
+}
+
+// Produits
+model Product {
+  id              String        @id @default(uuid())
+  supplierId      String
+  categoryId      String
+  name            String
+  slug            String        @unique
+  description     String        @db.Text
+  images          Json          // Array d'URLs d'images
+  priceSolo       Float         // Prix unitaire normal
+  priceGroupBase  Float         // Prix de base en groupe
+  stock           Int           @default(0)
+  minParticipants Int           @default(5)
+  maxParticipants Int           @default(100)
+  status          ProductStatus @default(DRAFT)
+  isActive        Boolean       @default(true)
+  viewCount       Int           @default(0)
+  soldCount       Int           @default(0)
+  validatedAt     DateTime?
+  validatedBy     String?       // Admin ID
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  supplier  Supplier   @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  category  Category   @relation(fields: [categoryId], references: [id])
+  groups    Group[]
+  reviews   Review[]
+
+  @@index([supplierId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([slug])
+  @@map("products")
+}
+
+// Groupes d'achat
+model Group {
+  id                String      @id @default(uuid())
+  productId         String
+  name              String
+  minParticipants   Int
+  maxParticipants   Int
+  currentParticipants Int       @default(0)
+  startDate         DateTime    @default(now())
+  endDate           DateTime
+  currentPrice      Float       // Prix actuel basé sur le nombre de participants
+  discountCurve     Json        // Courbe de réduction par paliers
+  status            GroupStatus @default(OPEN)
+  completedAt       DateTime?
+  createdBy         String      // User ID ou Admin ID
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  // Relations
+  product      Product       @relation(fields: [productId], references: [id])
+  members      GroupMember[]
+  orders       Order[]
+
+  @@index([productId])
+  @@index([status])
+  @@index([endDate])
+  @@map("groups")
+}
+
+// Membres des groupes
+model GroupMember {
+  id                 String        @id @default(uuid())
+  groupId            String
+  userId             String
+  depositPaid        Float         // Montant du dépôt (5-10%)
+  depositStatus      PaymentStatus @default(PENDING)
+  finalPaymentStatus PaymentStatus @default(PENDING)
+  finalPaymentAmount Float?
+  joinedAt           DateTime      @default(now())
+  leftAt             DateTime?     // Si annulation avant complétude
+
+  // Relations
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId]) // Un user ne peut rejoindre qu'une fois le même groupe
+  @@index([groupId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+// Commandes
+model Order {
+  id              String      @id @default(uuid())
+  groupId         String
+  userId          String
+  orderNumber     String      @unique // Numéro de commande généré
+  totalAmount     Float
+  depositAmount   Float
+  finalAmount     Float
+  status          OrderStatus @default(PENDING)
+  trackingNumber  String?
+  shippingAddress String?
+  notes           String?     @db.Text
+  paidAt          DateTime?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  group    Group     @relation(fields: [groupId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  payments Payment[]
+
+  @@index([groupId])
+  @@index([userId])
+  @@index([status])
+  @@index([orderNumber])
+  @@map("orders")
+}
+
+// Paiements
+model Payment {
+  id              String        @id @default(uuid())
+  orderId         String
+  amount          Float
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  transactionId   String?       // ID transaction du provider
+  providerResponse Json?        // Réponse complète du provider
+  isDeposit       Boolean       @default(false) // true = dépôt, false = solde final
+  paidAt          DateTime?
+  refundedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+  @@index([transactionId])
+  @@map("payments")
+}
+
+// Notifications
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String           @db.Text
+  data      Json?            // Données additionnelles
+  isRead    Boolean          @default(false)
+  sentAt    DateTime?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+// Avis/Notes sur produits
+model Review {
+  id          String   @id @default(uuid())
+  productId   String
+  userId      String
+  rating      Int      // 1-5 étoiles
+  comment     String?  @db.Text
+  isModerated Boolean  @default(false)
+  isApproved  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId]) // Un user ne peut noter qu'une fois un produit
+  @@index([productId])
+  @@index([userId])
+  @@map("reviews")
+}
+
+// Logs d'audit (actions admin)
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String   // Admin qui a fait l'action
+  action    String   // Type d'action (VALIDATE_SUPPLIER, BAN_USER, etc.)
+  entity    String   // Type d'entité (User, Product, Group, etc.)
+  entityId  String   // ID de l'entité concernée
+  oldData   Json?    // Anciennes valeurs
+  newData   Json?    // Nouvelles valeurs
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
