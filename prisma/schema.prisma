@@ -1,0 +1,393 @@
+// ============================================================
+// SCHÉMA PRISMA - PLATEFORME ACHATS GROUPÉS
+// Burkina Faso | Node.js + PostgreSQL + Prisma ORM
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  VISITOR
+  MEMBER
+  SUPPLIER
+  GROUP_LEADER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  PENDING_VERIFICATION
+}
+
+enum SupplierStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum ProductStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum GroupStatus {
+  OPEN
+  THRESHOLD_REACHED
+  CLOSED
+  FAILED
+  CANCELLED
+}
+
+enum MemberStatus {
+  ACTIVE
+  CANCELLED
+  PAID
+}
+
+enum PaymentMethod {
+  ORANGE_MONEY
+  MOOV_MONEY
+  LIGDICASH
+  CARD
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+  ESCROWED
+}
+
+enum PaymentType {
+  DEPOSIT
+  FINAL_PAYMENT
+  REFUND
+  COMMISSION
+}
+
+enum OrderStatus {
+  CREATED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum NotifType {
+  NEW_MEMBER
+  PRICE_DROP
+  GROUP_SUCCESS
+  GROUP_FAILED
+  PAYMENT_DUE
+  DELIVERY_UPDATE
+  SYSTEM
+}
+
+enum DisputeStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+// ============================================================
+// MODÈLES
+// ============================================================
+
+model User {
+  id                String     @id @default(uuid())
+  email             String?    @unique
+  phone             String     @unique
+  name              String
+  passwordHash      String
+  role              Role       @default(MEMBER)
+  status            UserStatus @default(PENDING_VERIFICATION)
+  avatarUrl         String?
+  addressLine       String?
+  city              String     @default("Ouagadougou")
+  latitude          Float?
+  longitude         Float?
+  trustScore        Float      @default(100)
+  twoFactorEnabled  Boolean    @default(false)
+  twoFactorSecret   String?
+  notifEmail        Boolean    @default(true)
+  notifSMS          Boolean    @default(true)
+  notifPush         Boolean    @default(true)
+  referralCode      String?    @unique
+  referredById      String?
+  referredBy        User?      @relation("Referrals", fields: [referredById], references: [id])
+  referrals         User[]     @relation("Referrals")
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  supplier          Supplier?
+  groupMembers      GroupMember[]
+  notifications     Notification[]
+  reviews           Review[]
+  payments          Payment[]
+  disputes          Dispute[]
+  auditLogs         AuditLog[]
+  sessions          Session[]
+  otpCodes          OtpCode[]
+
+  @@index([phone])
+  @@index([email])
+  @@index([status])
+}
+
+model OtpCode {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String
+  type      String   // REGISTER, LOGIN, RESET_PASSWORD, TWO_FACTOR
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, type])
+}
+
+model Session {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String  @unique
+  ipAddress   String?
+  userAgent   String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Supplier {
+  id             String         @id @default(uuid())
+  userId         String         @unique
+  user           User           @relation(fields: [userId], references: [id])
+  companyName    String
+  siret          String?        @unique
+  taxId          String?
+  docsUrls       String[]
+  status         SupplierStatus @default(PENDING)
+  commissionRate Float          @default(0.07)
+  validatedAt    DateTime?
+  validatedBy    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  products       Product[]
+  groups         Group[]
+}
+
+model Category {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  slug      String     @unique
+  parentId  String?
+  parent    Category?  @relation("SubCategories", fields: [parentId], references: [id])
+  children  Category[] @relation("SubCategories")
+  products  Product[]
+  createdAt DateTime   @default(now())
+}
+
+model Product {
+  id             String        @id @default(uuid())
+  supplierId     String
+  supplier       Supplier      @relation(fields: [supplierId], references: [id])
+  categoryId     String
+  category       Category      @relation(fields: [categoryId], references: [id])
+  name           String
+  description    String
+  soloPrice      Float
+  baseGroupPrice Float
+  stock          Int
+  reservedStock  Int           @default(0)
+  imagesUrls     String[]
+  status         ProductStatus @default(DRAFT)
+  approvedAt     DateTime?
+  approvedBy     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  groups         Group[]
+  reviews        Review[]
+
+  @@index([status])
+  @@index([categoryId])
+}
+
+model Group {
+  id              String      @id @default(uuid())
+  productId       String
+  product         Product     @relation(fields: [productId], references: [id])
+  supplierId      String?
+  supplier        Supplier?   @relation(fields: [supplierId], references: [id])
+  createdByAdmin  Boolean     @default(false)
+  title           String
+  minParticipants Int
+  maxParticipants Int
+  currentCount    Int         @default(0)
+  currentPrice    Float
+  depositPercent  Float       @default(0.1)
+  status          GroupStatus @default(OPEN)
+  expiresAt       DateTime
+  reachedAt       DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  pricingTiers    PricingTier[]
+  members         GroupMember[]
+  orders          Order[]
+  notifications   Notification[]
+
+  @@index([status, expiresAt])
+  @@index([productId])
+}
+
+model PricingTier {
+  id               String  @id @default(uuid())
+  groupId          String
+  group            Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  participantCount Int
+  discountPercent  Float
+  priceAtTier      Float
+
+  @@index([groupId])
+}
+
+model GroupMember {
+  id          String       @id @default(uuid())
+  groupId     String
+  group       Group        @relation(fields: [groupId], references: [id])
+  userId      String
+  user        User         @relation(fields: [userId], references: [id])
+  isLeader    Boolean      @default(false)
+  status      MemberStatus @default(ACTIVE)
+  depositPaid Float
+  joinedAt    DateTime     @default(now())
+  cancelledAt DateTime?
+
+  payments    Payment[]
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  groupMemberId   String?
+  groupMember     GroupMember?  @relation(fields: [groupMemberId], references: [id])
+  amount          Float
+  currency        String        @default("XOF")
+  method          PaymentMethod
+  type            PaymentType
+  status          PaymentStatus @default(PENDING)
+  transactionRef  String?       @unique
+  gatewayResponse Json?
+  processedAt     DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Order {
+  id               String      @id @default(uuid())
+  groupId          String
+  group            Group       @relation(fields: [groupId], references: [id])
+  totalAmount      Float
+  commissionAmount Float
+  status           OrderStatus @default(CREATED)
+  trackingCode     String?
+  shippedAt        DateTime?
+  deliveredAt      DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([status])
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  groupId   String?
+  group     Group?    @relation(fields: [groupId], references: [id])
+  type      NotifType
+  title     String
+  body      String
+  isRead    Boolean   @default(false)
+  sentVia   String[]
+  createdAt DateTime  @default(now())
+
+  @@index([userId, isRead])
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  rating      Int
+  comment     String?
+  isModerated Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([productId])
+}
+
+model Dispute {
+  id          String        @id @default(uuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  groupId     String?
+  orderId     String?
+  subject     String
+  description String
+  status      DisputeStatus @default(OPEN)
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+}
