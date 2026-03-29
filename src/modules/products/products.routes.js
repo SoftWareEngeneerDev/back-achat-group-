@@ -1,27 +1,65 @@
+// ============================================================
+// PRODUCTS ROUTES — Catalogue et gestion des produits
+// Plateforme Achats Groupés — Burkina Faso
+// Base URL : /api/v1
+// ============================================================
+// IMPORTANT : Les routes /admin/products/* sont dans admin.routes.js
+// Ce fichier ne contient QUE les routes publiques et fournisseur.
+// ============================================================
+
 const router = require('express').Router();
 const { body } = require('express-validator');
 const controller = require('./products.controller');
 const { validate } = require('../../middleware/validate');
-const { authenticate, requireAdmin, requireSupplier } = require('../../middleware/auth');
+const { authenticate, requireSupplier } = require('../../middleware/auth');
 
 /**
  * @swagger
  * tags:
  *   name: Products
- *   description: Gestion des produits et catégories
+ *   description: Catalogue produits et gestion fournisseur
  */
 
-// Public
+// ============================================================
+// ROUTES PUBLIQUES — Accessibles sans authentification
+// ============================================================
 
 /**
  * @swagger
  * /products:
  *   get:
  *     tags: [Products]
- *     summary: Liste globale des produits approuvés
+ *     summary: Catalogue public des produits approuvés
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Recherche par nom
+ *       - in: query
+ *         name: category
+ *         schema: { type: string }
+ *         description: Filtrer par catégorie (id)
+ *       - in: query
+ *         name: minPrice
+ *         schema: { type: number }
+ *       - in: query
+ *         name: maxPrice
+ *         schema: { type: number }
+ *       - in: query
+ *         name: inStock
+ *         schema: { type: boolean }
+ *         description: Uniquement les produits en stock
+ *       - in: query
+ *         name: sort
+ *         schema: { type: string, enum: [price_asc, price_desc, popular] }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
  *     responses:
- *       200:
- *         description: Liste des produits
+ *       200: { description: Liste paginée des produits }
  */
 router.get('/products', controller.listProducts.bind(controller));
 
@@ -30,16 +68,15 @@ router.get('/products', controller.listProducts.bind(controller));
  * /products/{id}:
  *   get:
  *     tags: [Products]
- *     summary: Détails d'un produit public
+ *     summary: Détail complet d'un produit (avis + groupes ouverts)
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     responses:
- *       200:
- *         description: Détails du produit
+ *       200: { description: Détail produit avec avis et groupes actifs }
+ *       404: { description: Produit introuvable }
  */
 router.get('/products/:id', controller.getProduct.bind(controller));
 
@@ -48,21 +85,48 @@ router.get('/products/:id', controller.getProduct.bind(controller));
  * /categories:
  *   get:
  *     tags: [Products]
- *     summary: Liste globale des catégories
+ *     summary: Liste des catégories hiérarchiques
  *     responses:
- *       200:
- *         description: Liste des catégories
+ *       200: { description: Catégories avec sous-catégories }
  */
 router.get('/categories', controller.listCategories.bind(controller));
 
-// Fournisseur
+// ============================================================
+// ROUTES FOURNISSEUR — Gestion de SES propres produits
+// ============================================================
+
+/**
+ * @swagger
+ * /supplier/products:
+ *   get:
+ *     tags: [Products]
+ *     summary: UC19 — Liste de MES produits (fournisseur connecté)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [PENDING_APPROVAL, APPROVED, REJECTED, ARCHIVED]
+ *         description: Filtrer par statut
+ *     responses:
+ *       200: { description: Mes produits paginés }
+ *       403: { description: Compte fournisseur non validé }
+ */
+router.get(
+  '/supplier/products',
+  authenticate,
+  requireSupplier,
+  controller.getMyProducts.bind(controller),
+);
 
 /**
  * @swagger
  * /supplier/products:
  *   post:
  *     tags: [Products]
- *     summary: Créer un nouveau produit (Fournisseur)
+ *     summary: UC19 — Soumettre un nouveau produit pour validation
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -73,91 +137,122 @@ router.get('/categories', controller.listCategories.bind(controller));
  *             type: object
  *             required: [name, description, soloPrice, baseGroupPrice, stock, categoryId]
  *             properties:
- *               name: { type: string, example: "Sac de Riz 25kg" }
- *               description: { type: string, example: "Riz parfumé 1er choix" }
- *               soloPrice: { type: number, example: 15000 }
+ *               name:           { type: string, example: "Sac de Riz 25kg" }
+ *               description:    { type: string, example: "Riz parfumé 1er choix" }
+ *               soloPrice:      { type: number, example: 15000 }
  *               baseGroupPrice: { type: number, example: 12000 }
- *               stock: { type: integer, example: 100 }
- *               categoryId: { type: string, format: uuid }
+ *               stock:          { type: integer, example: 100 }
+ *               categoryId:     { type: string, format: uuid }
+ *               imagesUrls:     { type: array, items: { type: string } }
  *     responses:
- *       201:
- *         description: Produit créé (en attente de validation)
+ *       201: { description: Produit soumis en PENDING_APPROVAL }
+ *       403: { description: Compte fournisseur non validé }
+ *       400: { description: Prix groupé doit être inférieur au prix solo }
  */
-router.post('/supplier/products', authenticate, requireSupplier, [
-  body('name').notEmpty(),
-  body('description').notEmpty(),
-  body('soloPrice').isFloat({ min: 0 }),
-  body('baseGroupPrice').isFloat({ min: 0 }),
-  body('stock').isInt({ min: 0 }),
-  body('categoryId').notEmpty(),
-], validate, controller.createProduct.bind(controller));
+router.post(
+  '/supplier/products',
+  authenticate,
+  requireSupplier,
+  [
+    body('name').notEmpty().withMessage('Nom du produit requis'),
+    body('description').notEmpty().withMessage('Description requise'),
+    body('soloPrice')
+      .isFloat({ min: 1 }).withMessage('Prix solo invalide'),
+    body('baseGroupPrice')
+      .isFloat({ min: 1 }).withMessage('Prix groupé invalide'),
+    body('stock')
+      .isInt({ min: 0 }).withMessage('Stock invalide'),
+    body('categoryId')
+      .notEmpty().withMessage('Catégorie requise'),
+    body('imagesUrls')
+      .optional()
+      .isArray().withMessage('imagesUrls doit être un tableau'),
+  ],
+  validate,
+  controller.createProduct.bind(controller),
+);
 
 /**
  * @swagger
  * /supplier/products/{id}:
  *   put:
  *     tags: [Products]
- *     summary: Modifier un produit existant (Fournisseur)
+ *     summary: UC20 — Modifier UN DE MES produits
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     requestBody:
- *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             properties:
- *               name: { type: string }
- *               description: { type: string }
- *               soloPrice: { type: number }
+ *               name:           { type: string }
+ *               description:    { type: string }
+ *               soloPrice:      { type: number }
  *               baseGroupPrice: { type: number }
- *               stock: { type: integer }
+ *               stock:          { type: integer }
+ *               imagesUrls:     { type: array, items: { type: string } }
  *     responses:
- *       200:
- *         description: Produit modifié
+ *       200: { description: Produit mis à jour, repassé en PENDING_APPROVAL }
+ *       404: { description: Produit introuvable ou non autorisé }
+ *       409: { description: Groupe actif en cours sur ce produit }
  */
-router.put('/supplier/products/:id', authenticate, requireSupplier, controller.updateProduct.bind(controller));
+router.put(
+  '/supplier/products/:id',
+  authenticate,
+  requireSupplier,
+  [
+    body('soloPrice').optional().isFloat({ min: 1 }),
+    body('baseGroupPrice').optional().isFloat({ min: 1 }),
+    body('stock').optional().isInt({ min: 0 }),
+  ],
+  validate,
+  controller.updateProduct.bind(controller),
+);
 
 /**
  * @swagger
  * /supplier/products/{id}:
  *   delete:
  *     tags: [Products]
- *     summary: Supprimer un produit (Fournisseur)
+ *     summary: UC20 — Archiver UN DE MES produits (soft delete)
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     responses:
- *       200:
- *         description: Produit supprimé
+ *       200: { description: Produit archivé }
+ *       404: { description: Produit introuvable ou non autorisé }
+ *       409: { description: Groupe actif en cours — impossible de supprimer }
  */
-router.delete('/supplier/products/:id', authenticate, requireSupplier, controller.deleteProduct.bind(controller));
+router.delete(
+  '/supplier/products/:id',
+  authenticate,
+  requireSupplier,
+  controller.deleteProduct.bind(controller),
+);
 
 /**
  * @swagger
  * /supplier/products/{id}/stock:
  *   patch:
  *     tags: [Products]
- *     summary: Ajuster le stock d'un produit (Fournisseur)
+ *     summary: UC21 — Synchroniser le stock d'UN DE MES produits
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     requestBody:
  *       required: true
  *       content:
@@ -166,60 +261,20 @@ router.delete('/supplier/products/:id', authenticate, requireSupplier, controlle
  *             type: object
  *             required: [stock]
  *             properties:
- *               stock: { type: integer, example: 50 }
+ *               stock: { type: integer, example: 50, minimum: 0 }
  *     responses:
- *       200:
- *         description: Stock ajusté
+ *       200: { description: Stock mis à jour }
+ *       404: { description: Produit introuvable ou non autorisé }
  */
-router.patch('/supplier/products/:id/stock', authenticate, requireSupplier, [
-  body('stock').isInt({ min: 0 }),
-], validate, controller.syncStock.bind(controller));
-
-// Admin
-
-/**
- * @swagger
- * /admin/products/pending:
- *   get:
- *     tags: [Products]
- *     summary: Liste des produits en attente de validation (Admin)
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Liste des produits
- */
-router.get('/admin/products/pending', authenticate, requireAdmin, controller.getPendingProducts.bind(controller));
-
-/**
- * @swagger
- * /admin/products/{id}/approve:
- *   patch:
- *     tags: [Products]
- *     summary: Approuver ou rejeter un produit (Admin)
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [approved]
- *             properties:
- *               approved: { type: boolean, example: true }
- *     responses:
- *       200:
- *         description: Statut du produit mis à jour
- */
-router.patch('/admin/products/:id/approve', authenticate, requireAdmin, [
-  body('approved').isBoolean(),
-], validate, controller.approveProduct.bind(controller));
+router.patch(
+  '/supplier/products/:id/stock',
+  authenticate,
+  requireSupplier,
+  [
+    body('stock').isInt({ min: 0 }).withMessage('Stock doit être un entier positif ou nul'),
+  ],
+  validate,
+  controller.syncStock.bind(controller),
+);
 
 module.exports = router;

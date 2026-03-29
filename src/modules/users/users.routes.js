@@ -1,37 +1,49 @@
+// ============================================================
+// USERS ROUTES — Profil et dashboard utilisateur
+// Plateforme Achats Groupés — Burkina Faso
+// Base URL : /api/v1/users
+// ============================================================
+// IMPORTANT : Les routes /admin/users/* sont dans admin.routes.js
+// Ce fichier ne contient QUE les routes de l'utilisateur connecté.
+// ============================================================
+
 const router = require('express').Router();
 const { body } = require('express-validator');
 const controller = require('./users.controller');
 const { validate } = require('../../middleware/validate');
-const { authenticate, requireAdmin } = require('../../middleware/auth');
+const { authenticate } = require('../../middleware/auth');
 
 /**
  * @swagger
  * tags:
  *   name: Users
- *   description: Gestion des profils et administration des utilisateurs
+ *   description: Profil et dashboard de l'utilisateur connecté
  */
+
+// ============================================================
+// PROFIL — UC7
+// ============================================================
 
 /**
  * @swagger
- * /me:
+ * /users/me:
  *   get:
  *     tags: [Users]
- *     summary: Récupérer le profil de l'utilisateur connecté
+ *     summary: UC7 — Profil complet de l'utilisateur connecté
  *     security:
  *       - bearerAuth: []
  *     responses:
- *       200:
- *         description: Profil utilisateur
+ *       200: { description: Profil utilisateur avec compteurs }
+ *       401: { description: Non authentifié }
  */
-// Routes utilisateur connecté
-router.get('/me', authenticate, controller.getProfile.bind(controller));
+router.get('/users/me', authenticate, controller.getProfile.bind(controller));
 
 /**
  * @swagger
- * /me:
+ * /users/me:
  *   put:
  *     tags: [Users]
- *     summary: Mettre à jour le profil de l'utilisateur
+ *     summary: UC7 — Mettre à jour son profil
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -41,145 +53,147 @@ router.get('/me', authenticate, controller.getProfile.bind(controller));
  *           schema:
  *             type: object
  *             properties:
- *               name: { type: string, example: "Alice Ouedraogo" }
- *               email: { type: string, format: email, example: "alice@example.com" }
- *               city: { type: string, example: "Bobo-Dioulasso" }
+ *               name:        { type: string, example: "Alice Ouédraogo" }
+ *               email:       { type: string, example: "alice@example.com" }
+ *               city:        { type: string, example: "Bobo-Dioulasso" }
+ *               addressLine: { type: string, example: "Secteur 12, Rue 14" }
+ *               avatarUrl:   { type: string }
+ *               notifEmail:  { type: boolean }
+ *               notifSMS:    { type: boolean }
+ *               notifPush:   { type: boolean }
  *     responses:
- *       200:
- *         description: Profil mis à jour
+ *       200: { description: Profil mis à jour }
+ *       409: { description: Email déjà utilisé }
  */
-router.put('/me', authenticate, [
-  body('name').optional().trim().isLength({ min: 2 }),
-  body('email').optional().isEmail(),
-  body('city').optional().trim(),
-], validate, controller.updateProfile.bind(controller));
+router.put(
+  '/users/me',
+  authenticate,
+  [
+    body('name').optional().trim().isLength({ min: 2 }).withMessage('Nom trop court'),
+    body('email').optional().isEmail().withMessage('Email invalide'),
+    body('city').optional().trim(),
+    body('addressLine').optional().trim(),
+    body('notifEmail').optional().isBoolean(),
+    body('notifSMS').optional().isBoolean(),
+    body('notifPush').optional().isBoolean(),
+  ],
+  validate,
+  controller.updateProfile.bind(controller),
+);
 
 /**
  * @swagger
- * /me:
+ * /users/me:
  *   delete:
  *     tags: [Users]
- *     summary: Supprimer le compte de l'utilisateur connecté
+ *     summary: Supprimer son compte (RGPD)
+ *     description: Anonymise les données personnelles. Impossible si dans un groupe actif.
  *     security:
  *       - bearerAuth: []
  *     responses:
- *       200:
- *         description: Compte supprimé avec succès
+ *       200: { description: Compte anonymisé et supprimé }
+ *       409: { description: Impossible — groupe actif en cours }
  */
-router.delete('/me', authenticate, controller.deleteAccount.bind(controller));
+router.delete('/users/me', authenticate, controller.deleteAccount.bind(controller));
+
+// ============================================================
+// DASHBOARD — UC10, UC11
+// ============================================================
 
 /**
  * @swagger
- * /me/groups:
+ * /users/me/groups:
  *   get:
  *     tags: [Users]
- *     summary: Liste des groupes rejoints par l'utilisateur
+ *     summary: UC10 — Dashboard "Mes Groupes" (actifs + terminés)
  *     security:
  *       - bearerAuth: []
  *     responses:
- *       200:
- *         description: Liste des groupes
+ *       200: { description: Groupes actifs et historique groupes terminés }
  */
-router.get('/me/groups', authenticate, controller.getMyGroups.bind(controller));
+router.get('/users/me/groups', authenticate, controller.getMyGroups.bind(controller));
 
 /**
  * @swagger
- * /me/history:
+ * /users/me/history:
  *   get:
  *     tags: [Users]
- *     summary: Historique d'activités/commandes de l'utilisateur
+ *     summary: UC11 — Historique des achats et paiements
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
  *     responses:
- *       200:
- *         description: Historique
+ *       200: { description: Historique paginé des participations et paiements }
  */
-router.get('/me/history', authenticate, controller.getHistory.bind(controller));
+router.get('/users/me/history', authenticate, controller.getHistory.bind(controller));
 
-// Routes admin
+// ============================================================
+// NOTIFICATIONS — UC12
+// ============================================================
 
 /**
  * @swagger
- * /admin/users:
+ * /users/me/notifications:
  *   get:
  *     tags: [Users]
- *     summary: Liste de tous les utilisateurs (Admin)
+ *     summary: UC12 — Mes notifications avec compteur non lues
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
  *     responses:
- *       200:
- *         description: Liste des utilisateurs
+ *       200: { description: Notifications paginées + compteur non lues }
  */
-router.get('/admin/users', authenticate, requireAdmin, controller.listUsers.bind(controller));
+router.get('/users/me/notifications', authenticate, controller.getMyNotifications.bind(controller));
 
 /**
  * @swagger
- * /admin/users/{id}/status:
+ * /users/me/notifications/{id}/read:
  *   patch:
  *     tags: [Users]
- *     summary: Modifier le statut d'un utilisateur
+ *     summary: UC12 — Marquer une notification comme lue
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: ID de l'utilisateur
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [status]
- *             properties:
- *               status: 
- *                 type: string
- *                 enum: [ACTIVE, SUSPENDED, BANNED]
+ *         schema: { type: string }
  *     responses:
- *       200:
- *         description: Statut mis à jour
+ *       200: { description: Notification marquée comme lue }
  */
-router.patch('/admin/users/:id/status', authenticate, requireAdmin, [
-  body('status').isIn(['ACTIVE', 'SUSPENDED', 'BANNED']),
-], validate, controller.updateUserStatus.bind(controller));
+router.patch(
+  '/users/me/notifications/:id/read',
+  authenticate,
+  controller.markNotificationRead.bind(controller),
+);
 
 /**
  * @swagger
- * /admin/users/{id}/role:
- *   put:
+ * /users/me/notifications/read-all:
+ *   patch:
  *     tags: [Users]
- *     summary: Modifier le rôle d'un utilisateur
+ *     summary: UC12 — Marquer toutes les notifications comme lues
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: ID de l'utilisateur
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [role]
- *             properties:
- *               role:
- *                 type: string
- *                 enum: [MEMBER, SUPPLIER, GROUP_LEADER, ADMIN]
  *     responses:
- *       200:
- *         description: Rôle mis à jour
+ *       200: { description: Toutes notifications marquées comme lues }
  */
-router.put('/admin/users/:id/role', authenticate, requireAdmin, [
-  body('role').isIn(['MEMBER', 'SUPPLIER', 'GROUP_LEADER', 'ADMIN']),
-], validate, controller.updateUserRole.bind(controller));
+router.patch(
+  '/users/me/notifications/read-all',
+  authenticate,
+  controller.markAllNotificationsRead.bind(controller),
+);
 
 module.exports = router;
