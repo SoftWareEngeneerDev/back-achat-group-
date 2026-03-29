@@ -3,15 +3,13 @@
 // Plateforme Achats Groupés — Burkina Faso
 // Base URL : /api/v1
 // ============================================================
-// IMPORTANT : Les routes /admin/products/* sont dans admin.routes.js
-// Ce fichier ne contient QUE les routes publiques et fournisseur.
-// ============================================================
 
 const router = require('express').Router();
 const { body } = require('express-validator');
 const controller = require('./products.controller');
 const { validate } = require('../../middleware/validate');
 const { authenticate, requireSupplier } = require('../../middleware/auth');
+const { createLimiter } = require('../../middleware/rateLimit'); // ← AJOUT
 
 /**
  * @swagger
@@ -21,7 +19,7 @@ const { authenticate, requireSupplier } = require('../../middleware/auth');
  */
 
 // ============================================================
-// ROUTES PUBLIQUES — Accessibles sans authentification
+// ROUTES PUBLIQUES
 // ============================================================
 
 /**
@@ -34,11 +32,9 @@ const { authenticate, requireSupplier } = require('../../middleware/auth');
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Recherche par nom
  *       - in: query
  *         name: category
  *         schema: { type: string }
- *         description: Filtrer par catégorie (id)
  *       - in: query
  *         name: minPrice
  *         schema: { type: number }
@@ -48,7 +44,6 @@ const { authenticate, requireSupplier } = require('../../middleware/auth');
  *       - in: query
  *         name: inStock
  *         schema: { type: boolean }
- *         description: Uniquement les produits en stock
  *       - in: query
  *         name: sort
  *         schema: { type: string, enum: [price_asc, price_desc, popular] }
@@ -92,7 +87,7 @@ router.get('/products/:id', controller.getProduct.bind(controller));
 router.get('/categories', controller.listCategories.bind(controller));
 
 // ============================================================
-// ROUTES FOURNISSEUR — Gestion de SES propres produits
+// ROUTES FOURNISSEUR
 // ============================================================
 
 /**
@@ -109,10 +104,8 @@ router.get('/categories', controller.listCategories.bind(controller));
  *         schema:
  *           type: string
  *           enum: [PENDING_APPROVAL, APPROVED, REJECTED, ARCHIVED]
- *         description: Filtrer par statut
  *     responses:
  *       200: { description: Mes produits paginés }
- *       403: { description: Compte fournisseur non validé }
  */
 router.get(
   '/supplier/products',
@@ -147,26 +140,21 @@ router.get(
  *     responses:
  *       201: { description: Produit soumis en PENDING_APPROVAL }
  *       403: { description: Compte fournisseur non validé }
- *       400: { description: Prix groupé doit être inférieur au prix solo }
+ *       429: { description: Trop de créations récentes }
  */
 router.post(
   '/supplier/products',
   authenticate,
   requireSupplier,
+  createLimiter, // ← AJOUT : max 20 créations/heure par userId
   [
     body('name').notEmpty().withMessage('Nom du produit requis'),
     body('description').notEmpty().withMessage('Description requise'),
-    body('soloPrice')
-      .isFloat({ min: 1 }).withMessage('Prix solo invalide'),
-    body('baseGroupPrice')
-      .isFloat({ min: 1 }).withMessage('Prix groupé invalide'),
-    body('stock')
-      .isInt({ min: 0 }).withMessage('Stock invalide'),
-    body('categoryId')
-      .notEmpty().withMessage('Catégorie requise'),
-    body('imagesUrls')
-      .optional()
-      .isArray().withMessage('imagesUrls doit être un tableau'),
+    body('soloPrice').isFloat({ min: 1 }).withMessage('Prix solo invalide'),
+    body('baseGroupPrice').isFloat({ min: 1 }).withMessage('Prix groupé invalide'),
+    body('stock').isInt({ min: 0 }).withMessage('Stock invalide'),
+    body('categoryId').notEmpty().withMessage('Catégorie requise'),
+    body('imagesUrls').optional().isArray(),
   ],
   validate,
   controller.createProduct.bind(controller),
@@ -230,8 +218,7 @@ router.put(
  *         schema: { type: string }
  *     responses:
  *       200: { description: Produit archivé }
- *       404: { description: Produit introuvable ou non autorisé }
- *       409: { description: Groupe actif en cours — impossible de supprimer }
+ *       409: { description: Groupe actif en cours }
  */
 router.delete(
   '/supplier/products/:id',

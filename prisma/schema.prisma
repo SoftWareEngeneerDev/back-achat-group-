@@ -1,6 +1,7 @@
 // ============================================================
 // SCHÉMA PRISMA - PLATEFORME ACHATS GROUPÉS
 // Burkina Faso | Node.js + PostgreSQL + Prisma ORM
+// Version corrigée — alignée avec le code backend
 // ============================================================
 
 generator client {
@@ -113,72 +114,76 @@ enum DisputeStatus {
 // ============================================================
 
 model User {
-  id                String     @id @default(uuid())
-  email             String?    @unique
-  phone             String     @unique
-  name              String
-  passwordHash      String
-  role              Role       @default(MEMBER)
-  status            UserStatus @default(PENDING_VERIFICATION)
-  avatarUrl         String?
-  addressLine       String?
-  city              String     @default("Ouagadougou")
-  latitude          Float?
-  longitude         Float?
-  trustScore        Float      @default(100)
-  twoFactorEnabled  Boolean    @default(false)
-  twoFactorSecret   String?
-  notifEmail        Boolean    @default(true)
-  notifSMS          Boolean    @default(true)
-  notifPush         Boolean    @default(true)
-  referralCode      String?    @unique
-  referredById      String?
-  referredBy        User?      @relation("Referrals", fields: [referredById], references: [id])
-  referrals         User[]     @relation("Referrals")
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  id               String     @id @default(uuid())
+  email            String?    @unique
+  phone            String     @unique
+  name             String
+  passwordHash     String
+  role             Role       @default(MEMBER)
+  status           UserStatus @default(PENDING_VERIFICATION)
+  avatarUrl        String?
+  addressLine      String?
+  city             String     @default("Ouagadougou")
+  latitude         Float?
+  longitude        Float?
+  trustScore       Float      @default(100)
+  twoFactorEnabled Boolean    @default(false)
+  twoFactorSecret  String?
+  notifEmail       Boolean    @default(true)
+  notifSMS         Boolean    @default(true)
+  notifPush        Boolean    @default(true)
+  referralCode     String?    @unique
+  referredById     String?
+  referredBy       User?      @relation("Referrals", fields: [referredById], references: [id])
+  referrals        User[]     @relation("Referrals")
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 
-  supplier          Supplier?
-  groupMembers      GroupMember[]
-  notifications     Notification[]
-  reviews           Review[]
-  payments          Payment[]
-  disputes          Dispute[]
-  auditLogs         AuditLog[]
-  sessions          Session[]
-  otpCodes          OtpCode[]
+  supplier      Supplier?
+  groupMembers  GroupMember[]
+  notifications Notification[]
+  reviews       Review[]
+  payments      Payment[]
+  disputes      Dispute[]
+  auditLogs     AuditLog[]
+  sessions      Session[]
+  otpCodes      OtpCode[]
 
   @@index([phone])
   @@index([email])
   @@index([status])
 }
 
+// ── OTP — Codes de vérification SMS ─────────────────────────
 model OtpCode {
   id        String   @id @default(uuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   code      String
-  type      String   // REGISTER, LOGIN, RESET_PASSWORD, TWO_FACTOR
+  type      String   // REGISTER | LOGIN | RESET_PASSWORD | TWO_FACTOR
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  @@index([userId, type])
+  @@index([userId, type, used]) // Index optimisé pour les lookups fréquents
 }
 
+// ── Session — Refresh tokens actifs ─────────────────────────
+// CORRECTION : champ refreshToken (pas jwtToken)
 model Session {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshToken String  @unique
-  ipAddress   String?
-  userAgent   String?
-  expiresAt   DateTime
-  createdAt   DateTime @default(now())
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String   @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
 
   @@index([userId])
 }
 
+// ── Supplier — Profil fournisseur ────────────────────────────
 model Supplier {
   id             String         @id @default(uuid())
   userId         String         @unique
@@ -194,10 +199,11 @@ model Supplier {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  products       Product[]
-  groups         Group[]
+  products Product[]
+  groups   Group[]
 }
 
+// ── Category — Catégories hiérarchiques ─────────────────────
 model Category {
   id        String     @id @default(uuid())
   name      String     @unique
@@ -209,6 +215,7 @@ model Category {
   createdAt DateTime   @default(now())
 }
 
+// ── Product — Catalogue produits ─────────────────────────────
 model Product {
   id             String        @id @default(uuid())
   supplierId     String
@@ -222,52 +229,55 @@ model Product {
   stock          Int
   reservedStock  Int           @default(0)
   imagesUrls     String[]
-  status         ProductStatus @default(DRAFT)
-  approvedAt     DateTime?
-  approvedBy     String?
+  status         ProductStatus @default(PENDING_APPROVAL) // CORRECTION : défaut PENDING_APPROVAL
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  groups         Group[]
-  reviews        Review[]
+  groups  Group[]
+  reviews Review[]
 
   @@index([status])
   @@index([categoryId])
+  @@index([supplierId])
 }
 
+// ── Group — Groupe d'achat ────────────────────────────────────
+// CORRECTION : closedAt supprimé (non utilisé dans le code)
 model Group {
-  id              String      @id @default(uuid())
-  productId       String
-  product         Product     @relation(fields: [productId], references: [id])
-  supplierId      String?
-  supplier        Supplier?   @relation(fields: [supplierId], references: [id])
-  createdByAdmin  Boolean     @default(false)
-  title           String
+  id             String      @id @default(uuid())
+  productId      String
+  product        Product     @relation(fields: [productId], references: [id])
+  supplierId     String?
+  supplier       Supplier?   @relation(fields: [supplierId], references: [id])
+  createdByAdmin Boolean     @default(false)
+  title          String
   minParticipants Int
   maxParticipants Int
-  currentCount    Int         @default(0)
-  currentPrice    Float
-  depositPercent  Float       @default(0.1)
-  status          GroupStatus @default(OPEN)
-  expiresAt       DateTime
-  reachedAt       DateTime?
-  closedAt        DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  currentCount   Int         @default(0)
+  currentPrice   Float
+  depositPercent Float       @default(0.1)
+  status         GroupStatus @default(OPEN)
+  expiresAt      DateTime
+  reachedAt      DateTime?   // Date où le seuil minimum a été atteint
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  pricingTiers    PricingTier[]
-  members         GroupMember[]
-  orders          Order[]
-  notifications   Notification[]
+  pricingTiers  PricingTier[]
+  members       GroupMember[]
+  orders        Order[]
+  notifications Notification[]
+  payments      Payment[]     // AJOUT : relation directe pour les paiements par groupe
 
   @@index([status, expiresAt])
   @@index([productId])
+  @@index([supplierId])
 }
 
+// ── PricingTier — Paliers de réduction ───────────────────────
 model PricingTier {
-  id               String  @id @default(uuid())
+  id               String @id @default(uuid())
   groupId          String
-  group            Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group            Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
   participantCount Int
   discountPercent  Float
   priceAtTier      Float
@@ -275,6 +285,8 @@ model PricingTier {
   @@index([groupId])
 }
 
+// ── GroupMember — Participation d'un membre à un groupe ──────
+// CORRECTION : payments supprimé (Payment est lié à User + Group directement)
 model GroupMember {
   id          String       @id @default(uuid())
   groupId     String
@@ -283,43 +295,51 @@ model GroupMember {
   user        User         @relation(fields: [userId], references: [id])
   isLeader    Boolean      @default(false)
   status      MemberStatus @default(ACTIVE)
-  depositPaid Float
+  depositPaid Float        @default(0)
   joinedAt    DateTime     @default(now())
   cancelledAt DateTime?
-
-  payments    Payment[]
 
   @@unique([groupId, userId])
   @@index([groupId])
   @@index([userId])
-}
-
-model Payment {
-  id              String        @id @default(uuid())
-  userId          String
-  user            User          @relation(fields: [userId], references: [id])
-  groupMemberId   String?
-  groupMember     GroupMember?  @relation(fields: [groupMemberId], references: [id])
-  amount          Float
-  currency        String        @default("XOF")
-  method          PaymentMethod
-  type            PaymentType
-  status          PaymentStatus @default(PENDING)
-  transactionRef  String?       @unique
-  gatewayResponse Json?
-  processedAt     DateTime?
-  createdAt       DateTime      @default(now())
-
-  @@index([userId])
   @@index([status])
 }
 
+// ── Payment — Paiements (dépôts, soldes, remboursements) ─────
+// CORRECTION : groupMemberId supprimé → remplacé par groupId direct
+// CORRECTION : groupId ajouté pour lier directement au groupe
+model Payment {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id])
+  groupId        String?       // AJOUT : lien direct au groupe
+  group          Group?        @relation(fields: [groupId], references: [id])
+  amount         Float
+  currency       String        @default("XOF")
+  method         PaymentMethod @default(ORANGE_MONEY)
+  type           PaymentType
+  status         PaymentStatus @default(PENDING)
+  transactionRef String?       @unique
+  gatewayResponse Json?
+  processedAt    DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([userId])
+  @@index([groupId])
+  @@index([status])
+  @@index([transactionRef])
+}
+
+// ── Order — Commande groupée créée après succès ───────────────
+// CORRECTION : supplierAmount ajouté (utilisé dans payments.service.js)
+// CORRECTION : groupMembers relation ajoutée pour les requêtes
 model Order {
   id               String      @id @default(uuid())
   groupId          String
   group            Group       @relation(fields: [groupId], references: [id])
   totalAmount      Float
   commissionAmount Float
+  supplierAmount   Float       @default(0) // AJOUT : montant net fournisseur
   status           OrderStatus @default(CREATED)
   trackingCode     String?
   shippedAt        DateTime?
@@ -328,8 +348,10 @@ model Order {
   updatedAt        DateTime    @updatedAt
 
   @@index([status])
+  @@index([groupId])
 }
 
+// ── Notification — Alertes push/email/SMS ────────────────────
 model Notification {
   id        String    @id @default(uuid())
   userId    String
@@ -344,39 +366,46 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([userId, isRead])
+  @@index([userId, createdAt])
 }
 
+// ── Review — Avis produits post-livraison ────────────────────
 model Review {
   id          String   @id @default(uuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id])
   productId   String
   product     Product  @relation(fields: [productId], references: [id])
-  rating      Int
+  rating      Int      // 1 à 5
   comment     String?
   isModerated Boolean  @default(false)
   createdAt   DateTime @default(now())
 
+  @@unique([userId, productId]) // Un seul avis par produit par user
   @@index([productId])
 }
 
+// ── Dispute — Litiges membres/fournisseurs ───────────────────
+// CORRECTION : resolvedAt supprimé (non utilisé dans le code)
+// orderId gardé comme String? simple (pas de relation FK)
 model Dispute {
   id          String        @id @default(uuid())
   userId      String
   user        User          @relation(fields: [userId], references: [id])
   groupId     String?
-  orderId     String?
+  orderId     String?       // Référence simple sans FK (Order peut ne pas exister)
   subject     String
   description String
   status      DisputeStatus @default(OPEN)
-  resolvedBy  String?
-  resolvedAt  DateTime?
+  resolvedBy  String?       // ID de l'admin qui a résolu
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
   @@index([status])
+  @@index([userId])
 }
 
+// ── AuditLog — Journal des actions admin ─────────────────────
 model AuditLog {
   id        String   @id @default(uuid())
   userId    String
@@ -390,4 +419,6 @@ model AuditLog {
 
   @@index([userId])
   @@index([entity, entityId])
+  @@index([action])
+  @@index([createdAt])
 }

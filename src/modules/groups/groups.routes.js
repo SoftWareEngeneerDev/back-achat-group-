@@ -3,14 +3,13 @@
 // Plateforme Achats Groupés — Burkina Faso
 // Base URL : /api/v1
 // ============================================================
-// IMPORTANT : /admin/groups/close est dans admin.routes.js
-// ============================================================
 
 const router = require('express').Router();
 const { body } = require('express-validator');
 const controller = require('./groups.controller');
 const { validate } = require('../../middleware/validate');
 const { authenticate, requireAdmin, requireSupplier } = require('../../middleware/auth');
+const { joinGroupLimiter, createLimiter } = require('../../middleware/rateLimit'); // ← AJOUT
 
 /**
  * @swagger
@@ -104,9 +103,14 @@ router.get('/groups/:id/progress', controller.getGroupProgress.bind(controller))
  *     responses:
  *       200: { description: Montant du dépôt à payer + instructions }
  *       409: { description: Groupe complet / déjà membre / seuil atteint }
- *       403: { description: Trust score insuffisant }
+ *       429: { description: Trop de groupes rejoints récemment }
  */
-router.post('/groups/:id/join', authenticate, controller.joinGroup.bind(controller));
+router.post(
+  '/groups/:id/join',
+  authenticate,
+  joinGroupLimiter, // ← AJOUT : max 5 groupes rejoints/heure par userId
+  controller.joinGroup.bind(controller),
+);
 
 /**
  * @swagger
@@ -151,7 +155,7 @@ router.delete('/groups/:id/leave', authenticate, controller.leaveGroup.bind(cont
  *               title:           { type: string, example: "Groupe Riz 25kg Janvier" }
  *               minParticipants: { type: integer, example: 10 }
  *               maxParticipants: { type: integer, example: 50 }
- *               depositPercent:  { type: number, example: 0.1, description: "10% de dépôt" }
+ *               depositPercent:  { type: number, example: 0.1 }
  *               expiresAt:       { type: string, format: date-time }
  *               pricingTiers:
  *                 type: array
@@ -164,21 +168,22 @@ router.delete('/groups/:id/leave', authenticate, controller.leaveGroup.bind(cont
  *     responses:
  *       201: { description: Groupe créé et publié (statut OPEN) }
  *       403: { description: Fournisseur non validé }
- *       409: { description: Stock insuffisant }
+ *       429: { description: Trop de créations récentes }
  */
 router.post(
   '/supplier/groups',
   authenticate,
   requireSupplier,
+  createLimiter, // ← AJOUT : max 20 créations/heure par userId
   [
     body('productId').notEmpty().withMessage('ID produit requis'),
     body('minParticipants').isInt({ min: 2 }).withMessage('Minimum 2 participants'),
     body('maxParticipants').isInt({ min: 2 }).withMessage('Maximum invalide'),
-    body('expiresAt').isISO8601().withMessage('Date d\'expiration invalide'),
-    body('depositPercent').optional().isFloat({ min: 0.05, max: 0.5 }).withMessage('Dépôt entre 5% et 50%'),
+    body('expiresAt').isISO8601().withMessage("Date d'expiration invalide"),
+    body('depositPercent').optional().isFloat({ min: 0.05, max: 0.5 }),
     body('pricingTiers').isArray({ min: 1 }).withMessage('Au moins un palier de prix requis'),
-    body('pricingTiers.*.participantCount').isInt({ min: 1 }).withMessage('Nombre participants invalide'),
-    body('pricingTiers.*.discountPercent').isFloat({ min: 1, max: 90 }).withMessage('Réduction entre 1% et 90%'),
+    body('pricingTiers.*.participantCount').isInt({ min: 1 }),
+    body('pricingTiers.*.discountPercent').isFloat({ min: 1, max: 90 }),
   ],
   validate,
   controller.createGroup.bind(controller),

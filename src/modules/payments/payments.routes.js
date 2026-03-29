@@ -9,6 +9,8 @@ const { body } = require('express-validator');
 const controller = require('./payments.controller');
 const { validate } = require('../../middleware/validate');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
+const { paymentLimiter } = require('../../middleware/rateLimit'); // ← AJOUT
+const env = require('../../config/env');
 
 /**
  * @swagger
@@ -49,11 +51,12 @@ const { authenticate, requireAdmin } = require('../../middleware/auth');
  *     responses:
  *       201: { description: URL de paiement CinetPay générée }
  *       409: { description: Groupe complet / déjà membre }
- *       403: { description: Trust score insuffisant }
+ *       429: { description: Trop de tentatives de paiement }
  */
 router.post(
   '/payments/deposit',
   authenticate,
+  paymentLimiter, // ← AJOUT : max 10 paiements/heure par userId
   [
     body('groupId').notEmpty().withMessage('ID du groupe requis'),
     body('method')
@@ -94,11 +97,12 @@ router.post(
  *     responses:
  *       201: { description: URL de paiement final générée }
  *       409: { description: Seuil non atteint / déjà payé }
- *       404: { description: Pas membre de ce groupe }
+ *       429: { description: Trop de tentatives de paiement }
  */
 router.post(
   '/payments/final',
   authenticate,
+  paymentLimiter, // ← AJOUT : max 10 paiements/heure par userId
   [
     body('groupId').notEmpty().withMessage('ID du groupe requis'),
     body('method')
@@ -162,17 +166,12 @@ router.get('/payments/:id/status', authenticate, controller.getPaymentStatus.bin
  *   post:
  *     tags: [Payments]
  *     summary: Webhook CinetPay (callback automatique après paiement)
- *     description: |
- *       Endpoint appelé automatiquement par CinetPay après chaque paiement.
- *       Pas d'authentification JWT — sécurisé par la signature CinetPay.
- *       Toujours retourne 200 pour éviter les retry.
  *     responses:
  *       200: { description: Webhook traité }
  */
 router.post(
   '/payments/webhooks/cinetpay',
   controller.cinetpayWebhook.bind(controller),
-  // Pas de authenticate ici — CinetPay n'envoie pas de JWT
 );
 
 // ============================================================
@@ -212,5 +211,146 @@ router.post(
   validate,
   controller.refund.bind(controller),
 );
+
+// ============================================================
+// 🧪 SIMULATION — DEV UNIQUEMENT
+// ============================================================
+
+/**
+ * @swagger
+ * /payments/simulate/{transactionRef}:
+ *   post:
+ *     tags: [Payments]
+ *     summary: 🧪 DEV ONLY — Simuler un paiement CinetPay réussi ou échoué
+ *     description: |
+ *       Simule le callback CinetPay pour tester le flow complet en développement.
+ *       Flow complet :
+ *       1. POST /groups/{id}/join
+ *       2. POST /payments/deposit → récupérer le transactionRef
+ *       3. POST /payments/simulate/{transactionRef} → membre confirmé
+ *       4. POST /payments/final → récupérer le nouveau transactionRef
+ *       5. POST /payments/simulate/{transactionRef} → commande créée
+ *     parameters:
+ *       - in: path
+ *         name: transactionRef
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               success:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       200: { description: Paiement simulé avec succès }
+ *       403: { description: DEV uniquement }
+ *       404: { description: Transaction introuvable }
+ *       409: { description: Paiement déjà traité }
+ */
+router.post('/payments/simulate/:transactionRef', async (req, res, next) => {
+  try {
+    if (!env.IS_DEV) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Route de simulation disponible en DEV uniquement' },
+      });
+    }
+
+    const { transactionRef } = req.params;
+    const success = req.body.success !== false;
+
+    const prisma = require('../../config/database');
+    const payment = await prisma.payment.findUnique({ where: { transactionRef } });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: `Transaction introuvable : ${transactionRef}` },
+      });
+    }
+
+    if (payment.status !== 'PENDING') {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'CONFLICT', message: `Paiement déjà traité (statut : ${payment.status})` },
+      });
+    }
+
+    const simulatedPayload = {
+      cpm_trans_id: transactionRef,
+      cpm_result: success ? '00' : '01',
+      cpm_amount: payment.amount,
+      cpm_currency: 'XOF',
+      cpm_site_id: 'SIMULATION',
+      cpm_payment_date: new Date().toISOString(),
+      simulated: true,
+    };
+
+    const paymentsService = require('./payments.service');
+    await paymentsService.handleCinetPayWebhook(simulatedPayload);
+
+    const updatedPayment = await prisma.payment.findUnique({ where: { transactionRef } });
+
+    return res.status(200).json({
+      success: true,
+      message: `Paiement ${success ? 'réussi ✅' : 'échoué ❌'} simulé avec succès`,
+      data: {
+        transactionRef,
+        previousStatus: payment.status,
+        newStatus: updatedPayment.status,
+        amount: payment.amount,
+        type: payment.type,
+        simulated: true,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * @swagger
+ * /payments/simulate/status/{transactionRef}:
+ *   get:
+ *     tags: [Payments]
+ *     summary: 🧪 DEV ONLY — Voir le statut d'une transaction
+ *     parameters:
+ *       - in: path
+ *         name: transactionRef
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Détail complet de la transaction }
+ *       403: { description: DEV uniquement }
+ */
+router.get('/payments/simulate/status/:transactionRef', async (req, res, next) => {
+  try {
+    if (!env.IS_DEV) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Route de simulation disponible en DEV uniquement' },
+      });
+    }
+
+    const prisma = require('../../config/database');
+    const payment = await prisma.payment.findUnique({
+      where: { transactionRef: req.params.transactionRef },
+      include: {
+        group: { include: { product: { select: { name: true } } } },
+        user: { select: { name: true, phone: true } },
+      },
+    });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Transaction introuvable' },
+      });
+    }
+
+    return res.status(200).json({ success: true, data: payment });
+  } catch (err) { next(err); }
+});
 
 module.exports = router;

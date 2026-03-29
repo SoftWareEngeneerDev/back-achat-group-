@@ -2,18 +2,18 @@
 // ADMIN ROUTES — Endpoints de l'espace administration
 // Plateforme Achats Groupés — Burkina Faso
 // Base URL : /api/v1/admin
-// Accès : ADMIN uniquement (authenticate + requireAdmin)
-// Couvre : UC27 à UC38 du cahier des charges
+// Accès : ADMIN uniquement
 // ============================================================
 
 const router = require('express').Router();
-const { body, query } = require('express-validator');
+const { body } = require('express-validator');
 const controller = require('./admin.controller');
 const { authenticate, requireAdmin } = require('../../middleware/auth');
+const { adminLimiter } = require('../../middleware/rateLimit'); // ← AJOUT
 const { validate } = require('../../middleware/validate');
 
-// Tous les endpoints admin nécessitent authentification + rôle ADMIN
-router.use(authenticate, requireAdmin);
+// Tous les endpoints admin : authentification + rôle ADMIN + rate limit
+router.use(authenticate, requireAdmin, adminLimiter); // ← adminLimiter ajouté
 
 /**
  * @swagger
@@ -132,7 +132,6 @@ router.get('/admin/products/pending', controller.getPendingProducts.bind(control
  *               reason:   { type: string }
  *     responses:
  *       200: { description: Produit approuvé ou rejeté + notification fournisseur }
- *       404: { description: Produit introuvable }
  */
 router.patch(
   '/admin/products/:id/validate',
@@ -166,7 +165,6 @@ router.patch(
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Recherche par nom, téléphone ou email
  *     responses:
  *       200: { description: Liste paginée des utilisateurs }
  */
@@ -197,14 +195,13 @@ router.get('/admin/users', controller.getUsers.bind(controller));
  *               reason: { type: string }
  *     responses:
  *       200: { description: Statut mis à jour, sessions révoquées si suspendu/banni }
- *       400: { description: Impossible de modifier son propre statut }
  */
 router.patch(
   '/admin/users/:id/status',
   [
     body('status')
       .isIn(['ACTIVE', 'SUSPENDED', 'BANNED'])
-      .withMessage('Statut invalide. Valeurs : ACTIVE, SUSPENDED, BANNED'),
+      .withMessage('Statut invalide'),
     body('reason').optional().isString().trim(),
   ],
   validate,
@@ -292,13 +289,10 @@ router.get('/admin/groups', controller.getGroups.bind(controller));
  *               reason: { type: string, example: "Fournisseur indisponible" }
  *     responses:
  *       200: { description: Groupe annulé, membres notifiés }
- *       409: { description: Groupe déjà fermé }
  */
 router.patch(
   '/admin/groups/:id/close',
-  [
-    body('reason').optional().isString().trim(),
-  ],
+  [body('reason').optional().isString().trim()],
   validate,
   controller.closeGroup.bind(controller),
 );
@@ -335,7 +329,6 @@ router.get('/admin/refunds', controller.getPendingRefunds.bind(controller));
  *         schema: { type: string }
  *     responses:
  *       200: { description: Remboursement effectué, utilisateur notifié }
- *       409: { description: Paiement non remboursable }
  */
 router.post('/admin/refunds/:id/process', controller.processRefund.bind(controller));
 
@@ -352,7 +345,7 @@ router.post('/admin/refunds/:id/process', controller.processRefund.bind(controll
  *     security:
  *       - bearerAuth: []
  *     responses:
- *       200: { description: Indicateurs clés (users, groupes, revenus, commissions) }
+ *       200: { description: Indicateurs clés }
  */
 router.get('/admin/analytics/dashboard', controller.getDashboard.bind(controller));
 
@@ -378,7 +371,7 @@ router.get('/admin/analytics/groups', controller.getGroupsAnalytics.bind(control
  *     security:
  *       - bearerAuth: []
  *     responses:
- *       200: { description: Répartition par méthode, type + total escrow }
+ *       200: { description: Répartition par méthode + total escrow }
  */
 router.get('/admin/analytics/payments', controller.getPaymentsAnalytics.bind(controller));
 
@@ -395,7 +388,7 @@ router.get('/admin/analytics/payments', controller.getPaymentsAnalytics.bind(con
  *     security:
  *       - bearerAuth: []
  *     responses:
- *       200: { description: Statut DB, mémoire, uptime, version Node }
+ *       200: { description: Statut DB, mémoire, uptime }
  */
 router.get('/admin/system/health', controller.getSystemHealth.bind(controller));
 
@@ -417,7 +410,7 @@ router.get('/admin/system/health', controller.getSystemHealth.bind(controller));
  *         schema: { type: string }
  *       - in: query
  *         name: entity
- *         schema: { type: string, enum: [User, Supplier, Product, Group, Payment, System] }
+ *         schema: { type: string }
  *       - in: query
  *         name: userId
  *         schema: { type: string }
@@ -435,7 +428,7 @@ router.get('/admin/audit-logs', controller.getAuditLogs.bind(controller));
  *     security:
  *       - bearerAuth: []
  *     responses:
- *       200: { description: Export initié avec comptage des entités }
+ *       200: { description: Export initié }
  */
 router.post('/admin/backup/export', controller.exportGDPR.bind(controller));
 
