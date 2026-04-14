@@ -1,6 +1,5 @@
 // ============================================================
-// USERS CONTROLLER — Traitement des requêtes HTTP
-// Plateforme Achats Groupés — Burkina Faso
+// USERS CONTROLLER
 // ============================================================
 
 const usersService = require('./users.service');
@@ -8,11 +7,7 @@ const { success, paginated, notFound } = require('../../utils/response');
 
 class UsersController {
 
-  // ──────────────────────────────────────────────────────────
-  // PROFIL UTILISATEUR CONNECTÉ
-  // ──────────────────────────────────────────────────────────
-
-  /** GET /users/me — Profil de l'utilisateur connecté */
+  /** GET /users/me */
   async getProfile(req, res, next) {
     try {
       const user = await usersService.getProfile(req.user.id);
@@ -21,7 +16,7 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  /** PUT /users/me — Mettre à jour son profil */
+  /** PUT /users/me */
   async updateProfile(req, res, next) {
     try {
       const user = await usersService.updateProfile(req.user.id, req.body);
@@ -29,7 +24,22 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  /** DELETE /users/me — Supprimer son compte (GDPR) */
+  /** POST /users/me/avatar ← NOUVEAU */
+  async uploadAvatar(req, res, next) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Aucun fichier reçu' }
+        });
+      }
+
+      const result = await usersService.uploadAvatar(req.user.id, req.file);
+      return success(res, result, 'Photo de profil mise à jour');
+    } catch (err) { next(err); }
+  }
+
+  /** DELETE /users/me */
   async deleteAccount(req, res, next) {
     try {
       await usersService.deleteAccount(req.user.id);
@@ -37,11 +47,7 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // DASHBOARD UTILISATEUR
-  // ──────────────────────────────────────────────────────────
-
-  /** GET /users/me/groups — Dashboard "Mes Groupes" */
+  /** GET /users/me/groups */
   async getMyGroups(req, res, next) {
     try {
       const groups = await usersService.getMyGroups(req.user.id);
@@ -49,7 +55,7 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  /** GET /users/me/history — Historique des achats */
+  /** GET /users/me/history */
   async getHistory(req, res, next) {
     try {
       const { data, payments, total, page, limit } = await usersService.getHistory(req.user.id, req.query);
@@ -57,7 +63,7 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  /** GET /users/me/notifications — Mes notifications */
+  /** GET /users/me/notifications */
   async getMyNotifications(req, res, next) {
     try {
       const { data, total, unreadCount, page, limit } = await usersService.getMyNotifications(req.user.id, req.query);
@@ -65,7 +71,7 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  /** PATCH /users/me/notifications/:id/read — Marquer une notif comme lue */
+  /** PATCH /users/me/notifications/:id/read */
   async markNotificationRead(req, res, next) {
     try {
       await usersService.markNotificationRead(req.params.id, req.user.id);
@@ -73,7 +79,7 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  /** PATCH /users/me/notifications/read-all — Tout marquer comme lu */
+  /** PATCH /users/me/notifications/read-all */
   async markAllNotificationsRead(req, res, next) {
     try {
       await usersService.markAllNotificationsRead(req.user.id);
