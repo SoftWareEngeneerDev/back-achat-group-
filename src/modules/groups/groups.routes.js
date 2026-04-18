@@ -1,27 +1,48 @@
+// ============================================================
+// GROUPS ROUTES — Groupes d'achat
+// Plateforme Achats Groupés — Burkina Faso
+// Base URL : /api/v1
+// ============================================================
+
 const router = require('express').Router();
 const { body } = require('express-validator');
 const controller = require('./groups.controller');
 const { validate } = require('../../middleware/validate');
-const { authenticate, requireAdmin, requireSupplier, optionalAuth } = require('../../middleware/auth');
+const { authenticate, requireAdmin, requireSupplier } = require('../../middleware/auth');
+const { joinGroupLimiter, createLimiter } = require('../../middleware/rateLimit'); // ← AJOUT
 
 /**
  * @swagger
  * tags:
  *   name: Groups
- *   description: Gestion des groupes d'achats, paliers de prix et participations
+ *   description: Groupes d'achat — tarification dynamique et participations
  */
 
-// Public
+// ============================================================
+// ROUTES PUBLIQUES
+// ============================================================
 
 /**
  * @swagger
  * /groups:
  *   get:
  *     tags: [Groups]
- *     summary: Liste des groupes d'achats actifs
+ *     summary: UC3 — Liste des groupes actifs avec filtres
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [OPEN, THRESHOLD_REACHED, CLOSED, FAILED], default: OPEN }
+ *       - in: query
+ *         name: productId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
  *     responses:
- *       200:
- *         description: Liste paginée des groupes
+ *       200: { description: Liste paginée des groupes }
  */
 router.get('/groups', controller.listGroups.bind(controller));
 
@@ -30,16 +51,15 @@ router.get('/groups', controller.listGroups.bind(controller));
  * /groups/{id}:
  *   get:
  *     tags: [Groups]
- *     summary: Détails d'un groupe d'achat spécifique
+ *     summary: UC4 — Détail d'un groupe (paliers prix, membres anonymisés)
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     responses:
- *       200:
- *         description: Détails du groupe incluant produit et paliers
+ *       200: { description: Détail complet du groupe }
+ *       404: { description: Groupe introuvable }
  */
 router.get('/groups/:id', controller.getGroup.bind(controller));
 
@@ -48,69 +68,79 @@ router.get('/groups/:id', controller.getGroup.bind(controller));
  * /groups/{id}/progress:
  *   get:
  *     tags: [Groups]
- *     summary: Suivi de la progression du groupe (membres vs paliers)
+ *     summary: Progression en temps réel du groupe
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     responses:
- *       200:
- *         description: État d'avancement du groupe
+ *       200: { description: Progression, % complétion, places restantes }
  */
 router.get('/groups/:id/progress', controller.getGroupProgress.bind(controller));
 
-// Membre connecté
+// ============================================================
+// ROUTES MEMBRE
+// ============================================================
 
 /**
  * @swagger
  * /groups/{id}/join:
  *   post:
  *     tags: [Groups]
- *     summary: Rejoindre un groupe d'achat existant
+ *     summary: UC8 — Rejoindre un groupe (retourne le montant du dépôt à payer)
+ *     description: |
+ *       Étape 1 du flow de participation.
+ *       Retourne le montant du dépôt à payer via CinetPay.
+ *       Le membre est confirmé après paiement du dépôt.
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     responses:
- *       200:
- *         description: Adhésion réussie (retourne infos paiement acompte)
+ *       200: { description: Montant du dépôt à payer + instructions }
+ *       409: { description: Groupe complet / déjà membre / seuil atteint }
+ *       429: { description: Trop de groupes rejoints récemment }
  */
-router.post('/groups/:id/join', authenticate, controller.joinGroup.bind(controller));
+router.post(
+  '/groups/:id/join',
+  authenticate,
+  joinGroupLimiter, // ← AJOUT : max 5 groupes rejoints/heure par userId
+  controller.joinGroup.bind(controller),
+);
 
 /**
  * @swagger
  * /groups/{id}/leave:
  *   delete:
  *     tags: [Groups]
- *     summary: Quitter un groupe d'achat (annuler participation)
+ *     summary: UC9 — Quitter un groupe (uniquement si statut OPEN)
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     responses:
- *       200:
- *         description: Participation annulée
+ *       200: { description: Participation annulée, dépôt remboursé }
+ *       409: { description: Impossible après le seuil minimum }
  */
 router.delete('/groups/:id/leave', authenticate, controller.leaveGroup.bind(controller));
 
-// Fournisseur
+// ============================================================
+// ROUTES FOURNISSEUR
+// ============================================================
 
 /**
  * @swagger
  * /supplier/groups:
  *   post:
  *     tags: [Groups]
- *     summary: Créer un nouveau groupe d'achat (Fournisseur)
+ *     summary: UC22 — Créer un groupe d'achat (Fournisseur)
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -121,11 +151,12 @@ router.delete('/groups/:id/leave', authenticate, controller.leaveGroup.bind(cont
  *             type: object
  *             required: [productId, minParticipants, maxParticipants, expiresAt, pricingTiers]
  *             properties:
- *               productId: { type: string, format: uuid }
+ *               productId:       { type: string, format: uuid }
+ *               title:           { type: string, example: "Groupe Riz 25kg Janvier" }
  *               minParticipants: { type: integer, example: 10 }
  *               maxParticipants: { type: integer, example: 50 }
- *               expiresAt: { type: string, format: date-time }
- *               depositPercent: { type: number, example: 0.2 }
+ *               depositPercent:  { type: number, example: 0.1 }
+ *               expiresAt:       { type: string, format: date-time }
  *               pricingTiers:
  *                 type: array
  *                 items:
@@ -133,58 +164,79 @@ router.delete('/groups/:id/leave', authenticate, controller.leaveGroup.bind(cont
  *                   required: [participantCount, discountPercent]
  *                   properties:
  *                     participantCount: { type: integer, example: 10 }
- *                     discountPercent: { type: number, example: 5.5 }
+ *                     discountPercent:  { type: number, example: 10.5 }
  *     responses:
- *       201:
- *         description: Groupe créé
+ *       201: { description: Groupe créé et publié (statut OPEN) }
+ *       403: { description: Fournisseur non validé }
+ *       429: { description: Trop de créations récentes }
  */
-router.post('/supplier/groups', authenticate, requireSupplier, [
-  body('productId').notEmpty(),
-  body('minParticipants').isInt({ min: 2 }),
-  body('maxParticipants').isInt({ min: 2 }),
-  body('expiresAt').isISO8601(),
-  body('pricingTiers').isArray({ min: 1 }),
-  body('pricingTiers.*.participantCount').isInt({ min: 1 }),
-  body('pricingTiers.*.discountPercent').isFloat({ min: 1, max: 90 }),
-], validate, controller.createGroup.bind(controller));
+router.post(
+  '/supplier/groups',
+  authenticate,
+  requireSupplier,
+  createLimiter, // ← AJOUT : max 20 créations/heure par userId
+  [
+    body('productId').notEmpty().withMessage('ID produit requis'),
+    body('minParticipants').isInt({ min: 2 }).withMessage('Minimum 2 participants'),
+    body('maxParticipants').isInt({ min: 2 }).withMessage('Maximum invalide'),
+    body('expiresAt').isISO8601().withMessage("Date d'expiration invalide"),
+    body('depositPercent').optional().isFloat({ min: 0.05, max: 0.5 }),
+    body('pricingTiers').isArray({ min: 1 }).withMessage('Au moins un palier de prix requis'),
+    body('pricingTiers.*.participantCount').isInt({ min: 1 }),
+    body('pricingTiers.*.discountPercent').isFloat({ min: 1, max: 90 }),
+  ],
+  validate,
+  controller.createGroup.bind(controller),
+);
 
 /**
  * @swagger
  * /supplier/groups/{id}:
  *   put:
  *     tags: [Groups]
- *     summary: Modifier un groupe existant (Fournisseur)
+ *     summary: UC23 — Modifier un groupe ouvert (délai, max participants)
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *     requestBody:
- *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             properties:
- *               expiresAt: { type: string, format: date-time }
+ *               expiresAt:       { type: string, format: date-time }
  *               maxParticipants: { type: integer }
  *     responses:
- *       200:
- *         description: Groupe mis à jour
+ *       200: { description: Groupe mis à jour, membres notifiés }
+ *       403: { description: Non autorisé }
+ *       409: { description: Groupe non ouvert }
  */
-router.put('/supplier/groups/:id', authenticate, requireSupplier, controller.updateGroup.bind(controller));
+router.put(
+  '/supplier/groups/:id',
+  authenticate,
+  requireSupplier,
+  [
+    body('expiresAt').optional().isISO8601(),
+    body('maxParticipants').optional().isInt({ min: 2 }),
+  ],
+  validate,
+  controller.updateGroup.bind(controller),
+);
 
-// Admin
+// ============================================================
+// ROUTES ADMIN
+// ============================================================
 
 /**
  * @swagger
  * /admin/groups:
  *   post:
  *     tags: [Groups]
- *     summary: Créer un groupe d'achat forcé (Admin)
+ *     summary: UC29 — Créer un groupe manuellement (Admin)
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -195,47 +247,29 @@ router.put('/supplier/groups/:id', authenticate, requireSupplier, controller.upd
  *             type: object
  *             required: [productId, minParticipants, maxParticipants, expiresAt, pricingTiers]
  *             properties:
- *               productId: { type: string, format: uuid }
- *               minParticipants: { type: integer, example: 10 }
- *               maxParticipants: { type: integer, example: 50 }
- *               expiresAt: { type: string, format: date-time }
- *               pricingTiers:
- *                 type: array
- *                 items:
- *                   type: object
- *                   properties:
- *                     participantCount: { type: integer }
- *                     discountPercent: { type: number }
+ *               productId:       { type: string, format: uuid }
+ *               minParticipants: { type: integer }
+ *               maxParticipants: { type: integer }
+ *               expiresAt:       { type: string, format: date-time }
+ *               pricingTiers:    { type: array }
  *     responses:
- *       201:
- *         description: Groupe créé par l'admin
+ *       201: { description: Groupe créé par l'administration }
  */
-router.post('/admin/groups', authenticate, requireAdmin, [
-  body('productId').notEmpty(),
-  body('minParticipants').isInt({ min: 2 }),
-  body('maxParticipants').isInt({ min: 2 }),
-  body('expiresAt').isISO8601(),
-  body('pricingTiers').isArray({ min: 1 }),
-], validate, controller.createGroupAdmin.bind(controller));
-
-/**
- * @swagger
- * /admin/groups/{id}/close:
- *   patch:
- *     tags: [Groups]
- *     summary: Clôturer manuellement un groupe (Admin)
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Groupe clôturé
- */
-router.patch('/admin/groups/:id/close', authenticate, requireAdmin, controller.closeGroup.bind(controller));
+router.post(
+  '/admin/groups',
+  authenticate,
+  requireAdmin,
+  [
+    body('productId').notEmpty(),
+    body('minParticipants').isInt({ min: 2 }),
+    body('maxParticipants').isInt({ min: 2 }),
+    body('expiresAt').isISO8601(),
+    body('pricingTiers').isArray({ min: 1 }),
+    body('pricingTiers.*.participantCount').isInt({ min: 1 }),
+    body('pricingTiers.*.discountPercent').isFloat({ min: 1, max: 90 }),
+  ],
+  validate,
+  controller.createGroupAdmin.bind(controller),
+);
 
 module.exports = router;

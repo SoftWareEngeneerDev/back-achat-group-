@@ -1,8 +1,13 @@
-// users.controller.js
+// ============================================================
+// USERS CONTROLLER
+// ============================================================
+
 const usersService = require('./users.service');
-const { success, created, paginated, notFound, error } = require('../../utils/response');
+const { success, paginated, notFound } = require('../../utils/response');
 
 class UsersController {
+
+  /** GET /users/me */
   async getProfile(req, res, next) {
     try {
       const user = await usersService.getProfile(req.user.id);
@@ -11,20 +16,38 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
+  /** PUT /users/me */
   async updateProfile(req, res, next) {
     try {
       const user = await usersService.updateProfile(req.user.id, req.body);
-      return success(res, user, 'Profil mis à jour');
+      return success(res, user, 'Profil mis à jour avec succès');
     } catch (err) { next(err); }
   }
 
+  /** POST /users/me/avatar ← NOUVEAU */
+  async uploadAvatar(req, res, next) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Aucun fichier reçu' }
+        });
+      }
+
+      const result = await usersService.uploadAvatar(req.user.id, req.file);
+      return success(res, result, 'Photo de profil mise à jour');
+    } catch (err) { next(err); }
+  }
+
+  /** DELETE /users/me */
   async deleteAccount(req, res, next) {
     try {
       await usersService.deleteAccount(req.user.id);
-      return success(res, null, 'Compte supprimé (GDPR)');
+      return success(res, null, 'Compte supprimé conformément au RGPD');
     } catch (err) { next(err); }
   }
 
+  /** GET /users/me/groups */
   async getMyGroups(req, res, next) {
     try {
       const { data, total, page, limit } = await usersService.getMyGroups(req.user.id, req.query);
@@ -32,32 +55,35 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
+  /** GET /users/me/history */
   async getHistory(req, res, next) {
     try {
-      const { data, total, page, limit } = await usersService.getHistory(req.user.id, req.query);
-      return paginated(res, data, page, limit, total);
+      const { data, payments, total, page, limit } = await usersService.getHistory(req.user.id, req.query);
+      return paginated(res, { memberships: data, payments }, page, limit, total);
     } catch (err) { next(err); }
   }
 
-  // Admin
-  async listUsers(req, res, next) {
+  /** GET /users/me/notifications */
+  async getMyNotifications(req, res, next) {
     try {
-      const { data, total, page, limit } = await usersService.listUsers(req.query);
-      return paginated(res, data, page, limit, total);
+      const { data, total, unreadCount, page, limit } = await usersService.getMyNotifications(req.user.id, req.query);
+      return paginated(res, { notifications: data, unreadCount }, page, limit, total);
     } catch (err) { next(err); }
   }
 
-  async updateUserStatus(req, res, next) {
+  /** PATCH /users/me/notifications/:id/read */
+  async markNotificationRead(req, res, next) {
     try {
-      const user = await usersService.updateUserStatus(req.params.id, req.body.status, req.user.id);
-      return success(res, user, 'Statut mis à jour');
+      await usersService.markNotificationRead(req.params.id, req.user.id);
+      return success(res, null, 'Notification marquée comme lue');
     } catch (err) { next(err); }
   }
 
-  async updateUserRole(req, res, next) {
+  /** PATCH /users/me/notifications/read-all */
+  async markAllNotificationsRead(req, res, next) {
     try {
-      const user = await usersService.updateUserRole(req.params.id, req.body.role, req.user.id);
-      return success(res, user, 'Rôle mis à jour');
+      await usersService.markAllNotificationsRead(req.user.id);
+      return success(res, null, 'Toutes les notifications marquées comme lues');
     } catch (err) { next(err); }
   }
 }
