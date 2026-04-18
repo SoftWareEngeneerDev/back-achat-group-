@@ -175,6 +175,26 @@ router.patch('/supplier/products/:id/stock', authenticate, requireSupplier, [
   body('stock').isInt({ min: 0 }),
 ], validate, controller.syncStock.bind(controller));
 
+/**
+ * @swagger
+ * /supplier/products/{id}/submit:
+ *   patch:
+ *     tags: [Products]
+ *     summary: Soumettre un produit en brouillon pour validation admin (Fournisseur)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Produit soumis, en attente de validation
+ */
+router.patch('/supplier/products/:id/submit', authenticate, requireSupplier, controller.submitProduct.bind(controller));
+
 // Admin
 
 /**

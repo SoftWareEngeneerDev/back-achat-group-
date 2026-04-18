@@ -80,6 +80,7 @@ class AuthService {
 
     if (type === 'REGISTER') {
       await prisma.user.update({ where: { id: user.id }, data: { status: 'ACTIVE' } });
+      return { ...user, status: 'ACTIVE' };
     }
 
     return user;

@@ -44,7 +44,13 @@ router.post('/disputes', authenticate, [
 ], validate, async (req, res, next) => {
   try {
     const dispute = await prisma.dispute.create({
-      data: { userId: req.user.id, ...req.body },
+      data: {
+        userId: req.user.id,
+        subject: req.body.subject,
+        description: req.body.description,
+        groupId: req.body.groupId || null,
+        orderId: req.body.orderId || null,
+      },
     });
     return created(res, dispute, 'Litige ouvert');
   } catch (err) { next(err); }

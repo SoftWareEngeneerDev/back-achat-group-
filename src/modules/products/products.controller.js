@@ -51,6 +51,13 @@ class ProductsController {
     } catch (err) { next(err); }
   }
 
+  async submitProduct(req, res, next) {
+    try {
+      const product = await productsService.submitProduct(req.params.id, req.user.id);
+      return success(res, product, 'Produit soumis pour validation');
+    } catch (err) { next(err); }
+  }
+
   async getPendingProducts(req, res, next) {
     try {
       const { data, total, page, limit } = await productsService.getPendingProducts(req.query);

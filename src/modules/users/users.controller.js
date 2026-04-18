@@ -1,6 +1,6 @@
 // users.controller.js
 const usersService = require('./users.service');
-const { success, created, paginated, notFound } = require('../../utils/response');
+const { success, created, paginated, notFound, error } = require('../../utils/response');
 
 class UsersController {
   async getProfile(req, res, next) {
@@ -27,8 +27,8 @@ class UsersController {
 
   async getMyGroups(req, res, next) {
     try {
-      const groups = await usersService.getMyGroups(req.user.id);
-      return success(res, groups);
+      const { data, total, page, limit } = await usersService.getMyGroups(req.user.id, req.query);
+      return paginated(res, data, page, limit, total);
     } catch (err) { next(err); }
   }
 

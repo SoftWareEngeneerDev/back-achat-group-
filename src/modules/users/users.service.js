@@ -36,19 +36,25 @@ class UsersService {
     });
   }
 
-  async getMyGroups(userId) {
-    return prisma.groupMember.findMany({
-      where: { userId },
-      include: {
-        group: {
-          include: {
-            product: { select: { id: true, name: true, imagesUrls: true } },
-            pricingTiers: true,
+  async getMyGroups(userId, query = {}) {
+    const { page, limit, skip } = getPagination(query);
+    const [data, total] = await Promise.all([
+      prisma.groupMember.findMany({
+        where: { userId },
+        include: {
+          group: {
+            include: {
+              product: { select: { id: true, name: true, imagesUrls: true } },
+              pricingTiers: true,
+            },
           },
         },
-      },
-      orderBy: { joinedAt: 'desc' },
-    });
+        orderBy: { joinedAt: 'desc' },
+        skip, take: limit,
+      }),
+      prisma.groupMember.count({ where: { userId } }),
+    ]);
+    return { data, total, page, limit };
   }
 
   async getHistory(userId, query) {
@@ -111,6 +117,18 @@ class UsersService {
   }
 
   async updateUserRole(userId, role, adminId) {
+    if (role !== 'ADMIN') {
+      const target = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+      if (target?.role === 'ADMIN') {
+        const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } });
+        if (adminCount <= 1) {
+          const err = new Error('Impossible de rétrograder le dernier administrateur');
+          err.statusCode = 409;
+          throw err;
+        }
+      }
+    }
+
     const user = await prisma.user.update({
       where: { id: userId },
       data: { role },

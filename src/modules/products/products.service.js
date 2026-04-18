@@ -102,6 +102,9 @@ class ProductsService {
 
   async syncStock(productId, supplierId, newStock) {
     const supplier = await prisma.supplier.findFirst({ where: { userId: supplierId } });
+    const owned = await prisma.product.findFirst({ where: { id: productId, supplierId: supplier?.id } });
+    if (!owned) { const e = new Error('Produit introuvable'); e.status = 404; throw e; }
+
     const product = await prisma.product.update({
       where: { id: productId },
       data: { stock: newStock },
@@ -114,6 +117,20 @@ class ProductsService {
       });
     }
     return product;
+  }
+
+  async submitProduct(productId, supplierId) {
+    const supplier = await prisma.supplier.findFirst({ where: { userId: supplierId, status: 'APPROVED' } });
+    if (!supplier) { const e = new Error('Fournisseur non validé'); e.status = 403; throw e; }
+
+    const product = await prisma.product.findFirst({ where: { id: productId, supplierId: supplier.id } });
+    if (!product) { const e = new Error('Produit introuvable'); e.status = 404; throw e; }
+    if (product.status !== 'DRAFT') { const e = new Error('Seul un produit en brouillon peut être soumis'); e.status = 409; throw e; }
+
+    return prisma.product.update({
+      where: { id: productId },
+      data: { status: 'PENDING_APPROVAL' },
+    });
   }
 
   // Admin
