@@ -1,54 +1,61 @@
 // ============================================================
 // ORDERS SERVICE — Logique métier des commandes
-// Plateforme Achats Groupés — Burkina Faso
+// Djula Market — Burkina Faso
 // ============================================================
 
 const prisma = require('../../config/database');
 const { getPagination } = require('../../utils/helpers');
 const notificationService = require('../notifications/notification.service');
 
+// ── Sélections réutilisables ─────────────────────────────────
+const ORDER_INCLUDE = {
+  group: {
+    include: {
+      product : { select: { id: true, name: true, imagesUrls: true } },
+      supplier: { select: { id: true, companyName: true } },
+    },
+  },
+};
+
+// ── Helper fournisseur ────────────────────────────────────────
+const getSupplier = async (userId) => {
+  const supplier = await prisma.supplier.findFirst({ where: { userId } });
+  if (!supplier) {
+    const err = new Error('Profil fournisseur introuvable');
+    err.status = 403; throw err;
+  }
+  return supplier;
+};
+
 class OrdersService {
 
   // ──────────────────────────────────────────────────────────
-  // MEMBRE — Ses commandes
+  // MEMBRE
   // ──────────────────────────────────────────────────────────
 
   /**
-   * UC16 — Commandes de l'utilisateur connecté.
+   * Commandes de l'utilisateur connecté
    */
   async getMyOrders(userId) {
     return prisma.order.findMany({
-      where: { group: { members: { some: { userId } } } },
-      include: {
-        group: {
-          include: {
-            product: { select: { id: true, name: true, imagesUrls: true } },
-          },
-        },
-      },
+      where  : { userId },
+      include: ORDER_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
   }
 
   /**
-   * UC16 — Suivi d'une commande spécifique.
+   * Détail + suivi d'une commande spécifique
    */
-  async getOrderTracking(orderId, userId) {
+  async getOrderById(orderId, userId) {
     const order = await prisma.order.findFirst({
-      where: {
-        id: orderId,
-        group: { members: { some: { userId } } },
-      },
-      select: {
-        id: true,
-        status: true,
-        trackingCode: true,
-        shippedAt: true,
-        deliveredAt: true,
-        createdAt: true,
+      where  : { id: orderId, userId },
+      include: {
+        ...ORDER_INCLUDE,
         group: {
-          select: {
-            product: { select: { name: true } },
+          include: {
+            product : { select: { id: true, name: true, imagesUrls: true } },
+            supplier: { select: { id: true, companyName: true, phone: true } },
           },
         },
       },
@@ -56,29 +63,52 @@ class OrdersService {
 
     if (!order) {
       const err = new Error('Commande introuvable');
-      err.status = 404;
-      throw err;
+      err.status = 404; throw err;
     }
 
     return order;
   }
 
+  /**
+   * Confirmer la réception d'une commande (membre)
+   * Déclenche la libération du paiement au fournisseur
+   */
+  async confirmDelivery(orderId, userId) {
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, userId },
+    });
+
+    if (!order) {
+      const err = new Error('Commande introuvable');
+      err.status = 404; throw err;
+    }
+
+    if (order.status !== 'SHIPPED') {
+      const err = new Error('La commande doit être expédiée avant de confirmer la réception');
+      err.status = 409; throw err;
+    }
+
+    const updated = await prisma.order.update({
+      where: { id: orderId },
+      data : { status: 'DELIVERED', deliveredAt: new Date() },
+    });
+
+    // TODO: déclencher la libération du paiement escrow → fournisseur
+    // await paymentsService.releaseEscrow(order.groupId, order.userId);
+
+    return updated;
+  }
+
   // ──────────────────────────────────────────────────────────
-  // FOURNISSEUR — Ses commandes
+  // FOURNISSEUR
   // ──────────────────────────────────────────────────────────
 
   /**
-   * UC25 — Liste paginée des commandes du fournisseur.
+   * Liste paginée des commandes du fournisseur
    */
   async getSupplierOrders(userId, query) {
     const { page, limit, skip } = getPagination(query);
-
-    const supplier = await prisma.supplier.findFirst({ where: { userId } });
-    if (!supplier) {
-      const err = new Error('Profil fournisseur introuvable');
-      err.status = 404;
-      throw err;
-    }
+    const supplier = await getSupplier(userId);
 
     const where = { group: { supplierId: supplier.id } };
     if (query.status) where.status = query.status;
@@ -95,7 +125,7 @@ class OrdersService {
           },
         },
         skip,
-        take: limit,
+        take   : limit,
         orderBy: { createdAt: 'desc' },
       }),
       prisma.order.count({ where }),
@@ -105,16 +135,10 @@ class OrdersService {
   }
 
   /**
-   * UC25 — Confirmer la prise en charge d'une commande.
-   * Passe le statut de CREATED à PROCESSING.
+   * Confirmer la prise en charge d'une commande → PROCESSING
    */
   async confirmOrder(orderId, userId) {
-    const supplier = await prisma.supplier.findFirst({ where: { userId } });
-    if (!supplier) {
-      const err = new Error('Profil fournisseur introuvable');
-      err.status = 403;
-      throw err;
-    }
+    const supplier = await getSupplier(userId);
 
     const order = await prisma.order.findFirst({
       where: { id: orderId, group: { supplierId: supplier.id } },
@@ -122,26 +146,23 @@ class OrdersService {
 
     if (!order) {
       const err = new Error('Commande introuvable ou accès non autorisé');
-      err.status = 404;
-      throw err;
+      err.status = 404; throw err;
     }
 
     if (order.status !== 'CREATED') {
-      const err = new Error('Cette commande a déjà été confirmée');
-      err.status = 409;
-      throw err;
+      const err = new Error('Cette commande a déjà été prise en charge');
+      err.status = 409; throw err;
     }
 
     const updated = await prisma.order.update({
       where: { id: orderId },
-      data: { status: 'PROCESSING' },
+      data : { status: 'PROCESSING', confirmedAt: new Date() },
     });
 
-    // ── Notifier les membres ───────────────────────────────
     await notificationService.notifyGroupMembers(order.groupId, {
-      type: 'DELIVERY_UPDATE',
-      title: '📦 Commande en cours de traitement',
-      body: 'Le fournisseur a confirmé votre commande. Préparation en cours.',
+      type    : 'DELIVERY_UPDATE',
+      title   : '📦 Commande confirmée',
+      body    : 'Le fournisseur a confirmé votre commande. Préparation en cours.',
       channels: ['push'],
     });
 
@@ -149,15 +170,10 @@ class OrdersService {
   }
 
   /**
-   * UC25 — Marquer une commande comme expédiée avec code de suivi.
+   * Marquer une commande comme expédiée → SHIPPED
    */
   async shipOrder(orderId, userId, trackingCode) {
-    const supplier = await prisma.supplier.findFirst({ where: { userId } });
-    if (!supplier) {
-      const err = new Error('Profil fournisseur introuvable');
-      err.status = 403;
-      throw err;
-    }
+    const supplier = await getSupplier(userId);
 
     const order = await prisma.order.findFirst({
       where: { id: orderId, group: { supplierId: supplier.id } },
@@ -165,26 +181,23 @@ class OrdersService {
 
     if (!order) {
       const err = new Error('Commande introuvable ou accès non autorisé');
-      err.status = 404;
-      throw err;
+      err.status = 404; throw err;
     }
 
     if (order.status !== 'PROCESSING') {
       const err = new Error('La commande doit être en traitement avant d\'être expédiée');
-      err.status = 409;
-      throw err;
+      err.status = 409; throw err;
     }
 
     const updated = await prisma.order.update({
       where: { id: orderId },
-      data: { status: 'SHIPPED', trackingCode, shippedAt: new Date() },
+      data : { status: 'SHIPPED', trackingCode, shippedAt: new Date() },
     });
 
-    // ── Notifier les membres avec le code de suivi ─────────
     await notificationService.notifyGroupMembers(order.groupId, {
-      type: 'DELIVERY_UPDATE',
-      title: '🚚 Commande expédiée !',
-      body: `Votre commande est en route ! Code de suivi : ${trackingCode}`,
+      type    : 'DELIVERY_UPDATE',
+      title   : '🚚 Commande expédiée !',
+      body    : `Votre commande est en route ! Code de suivi : ${trackingCode}`,
       channels: ['sms', 'push'],
     });
 
@@ -192,26 +205,28 @@ class OrdersService {
   }
 
   // ──────────────────────────────────────────────────────────
-  // ADMIN — Toutes les commandes
+  // ADMIN
   // ──────────────────────────────────────────────────────────
 
   /**
-   * Liste paginée de toutes les commandes avec filtres.
+   * Liste paginée de toutes les commandes
    */
   async getAllOrders(query) {
     const { page, limit, skip } = getPagination(query);
     const where = {};
-    if (query.status) where.status = query.status;
+    if (query.status)     where.status = query.status;
+    if (query.supplierId) where.group  = { supplierId: query.supplierId };
+    if (query.userId)     where.userId = query.userId;
 
     const [data, total] = await Promise.all([
       prisma.order.findMany({
         where,
         skip,
-        take: limit,
+        take   : limit,
         include: {
           group: {
             include: {
-              product: { select: { name: true } },
+              product : { select: { name: true } },
               supplier: { select: { companyName: true } },
             },
           },
@@ -222,6 +237,22 @@ class OrdersService {
     ]);
 
     return { data, total, page, limit };
+  }
+
+  /**
+   * Forcer le statut d'une commande (admin)
+   */
+  async updateOrderStatus(orderId, status) {
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) {
+      const err = new Error('Commande introuvable');
+      err.status = 404; throw err;
+    }
+
+    return prisma.order.update({
+      where: { id: orderId },
+      data : { status },
+    });
   }
 }
 

@@ -1,111 +1,96 @@
 // ============================================================
 // ADMIN SERVICE — Logique métier de l'administration
-// Plateforme Achats Groupés — Burkina Faso
+// Djula Market — Burkina Faso
 // ============================================================
 
 const prisma = require('../../config/database');
 const { getPagination } = require('../../utils/helpers');
 const notificationService = require('../notifications/notification.service');
 
+// ── Helper : créer un audit log ──────────────────────────────
+const auditLog = (adminId, action, entity, entityId, metadata = {}) =>
+  prisma.auditLog.create({
+    data: { userId: adminId, action, entity, entityId, metadata },
+  });
+
+// ── Helper : bloquer l'auto-modification ─────────────────────
+const checkNotSelf = (userId, adminId, label) => {
+  if (userId === adminId) {
+    const err = new Error(label); err.status = 400; throw err;
+  }
+};
+
 class AdminService {
 
   // ──────────────────────────────────────────────────────────
-  // UC27 — GESTION DES FOURNISSEURS
+  // FOURNISSEURS
   // ──────────────────────────────────────────────────────────
 
   async getSuppliers(query) {
     const { page, limit, skip } = getPagination(query);
     const status = query.status || 'PENDING';
+    const where  = status === 'ALL' ? {} : { status };
 
     const [data, total] = await Promise.all([
       prisma.supplier.findMany({
-        where: status === 'ALL' ? {} : { status },
-        skip,
-        take: limit,
+        where, skip, take: limit,
         include: {
-          user: { select: { name: true, phone: true, email: true, createdAt: true } },
+          user  : { select: { name: true, phone: true, email: true, createdAt: true } },
           _count: { select: { products: true, groups: true } },
         },
         orderBy: { createdAt: 'asc' },
       }),
-      prisma.supplier.count({
-        where: status === 'ALL' ? {} : { status },
-      }),
+      prisma.supplier.count({ where }),
     ]);
 
     return { data, total, page, limit };
   }
 
-  /**
-   * UC27 — Valider ou rejeter un fournisseur.
-   * CORRECTION : Si approuvé → role=SUPPLIER + status=ACTIVE
-   */
   async validateSupplier(supplierId, adminId, approved, reason = null) {
-    const status = approved ? 'APPROVED' : 'REJECTED';
-
     const supplier = await prisma.supplier.findUnique({
-      where: { id: supplierId },
-      include: { user: { select: { id: true, name: true, phone: true, email: true } } },
+      where  : { id: supplierId },
+      include: { user: { select: { id: true, name: true } } },
     });
 
     if (!supplier) {
-      const err = new Error('Fournisseur introuvable');
-      err.status = 404; throw err;
+      const err = new Error('Fournisseur introuvable'); err.status = 404; throw err;
     }
-
     if (supplier.status !== 'PENDING') {
       const err = new Error(`Ce fournisseur a déjà été ${supplier.status === 'APPROVED' ? 'approuvé' : 'traité'}`);
       err.status = 409; throw err;
     }
 
-    // ── Mise à jour du statut fournisseur ─────────────────────
+    const status  = approved ? 'APPROVED' : 'REJECTED';
     const updated = await prisma.supplier.update({
       where: { id: supplierId },
-      data: {
-        status,
-        validatedAt: approved ? new Date() : null,
-        validatedBy: adminId,
-      },
+      data : { status, validatedAt: approved ? new Date() : null, validatedBy: adminId },
     });
 
-    // ── Si approuvé : role=SUPPLIER + status=ACTIVE ───────────
-    // CORRECTION : on ajoute status: 'ACTIVE' pour débloquer le compte
     if (approved) {
       await prisma.user.update({
         where: { id: supplier.userId },
-        data: {
-          role:   'SUPPLIER',
-          status: 'ACTIVE',
-        },
+        data : { role: 'SUPPLIER', status: 'ACTIVE' },
       });
     }
 
-    // ── Notifier le fournisseur ────────────────────────────────
     await notificationService.notify(supplier.userId, {
-      type: 'SYSTEM',
-      title: approved ? '✅ Compte fournisseur approuvé' : '❌ Demande fournisseur rejetée',
-      body: approved
+      type    : 'SYSTEM',
+      title   : approved ? '✅ Compte fournisseur approuvé' : '❌ Demande fournisseur rejetée',
+      body    : approved
         ? 'Félicitations ! Votre compte fournisseur a été validé. Vous pouvez maintenant ajouter vos produits.'
-        : `Votre demande a été rejetée.${reason ? ` Raison : ${reason}` : ''} Contactez le support pour plus d'informations.`,
+        : `Votre demande a été rejetée.${reason ? ` Raison : ${reason}` : ''} Contactez le support.`,
       channels: ['email', 'sms'],
     });
 
-    // ── Audit log ─────────────────────────────────────────────
-    await prisma.auditLog.create({
-      data: {
-        userId:   adminId,
-        action:   `SUPPLIER_${status}`,
-        entity:   'Supplier',
-        entityId: supplierId,
-        metadata: { reason, supplierName: supplier.companyName },
-      },
+    await auditLog(adminId, `SUPPLIER_${status}`, 'Supplier', supplierId, {
+      reason, supplierName: supplier.companyName,
     });
 
     return updated;
   }
 
   // ──────────────────────────────────────────────────────────
-  // UC28 — GESTION DES PRODUITS
+  // PRODUITS
   // ──────────────────────────────────────────────────────────
 
   async getPendingProducts(query) {
@@ -113,9 +98,8 @@ class AdminService {
 
     const [data, total] = await Promise.all([
       prisma.product.findMany({
-        where: { status: 'PENDING_APPROVAL' },
-        skip,
-        take: limit,
+        where  : { status: 'PENDING_APPROVAL' },
+        skip, take: limit,
         include: {
           supplier: { include: { user: { select: { name: true } } } },
           category: { select: { name: true } },
@@ -129,54 +113,40 @@ class AdminService {
   }
 
   async validateProduct(productId, adminId, approved, reason = null) {
-    const status = approved ? 'APPROVED' : 'REJECTED';
-
     const product = await prisma.product.findUnique({
-      where: { id: productId },
-      include: {
-        supplier: { include: { user: { select: { id: true, name: true } } } },
-      },
+      where  : { id: productId },
+      include: { supplier: { select: { userId: true } } },
     });
 
     if (!product) {
-      const err = new Error('Produit introuvable');
-      err.status = 404; throw err;
+      const err = new Error('Produit introuvable'); err.status = 404; throw err;
     }
-
     if (product.status !== 'PENDING_APPROVAL') {
       const err = new Error('Ce produit n\'est pas en attente de validation');
       err.status = 409; throw err;
     }
 
-    const updated = await prisma.product.update({
-      where: { id: productId },
-      data: { status },
-    });
+    const status  = approved ? 'APPROVED' : 'REJECTED';
+    const updated = await prisma.product.update({ where: { id: productId }, data: { status } });
 
     await notificationService.notify(product.supplier.userId, {
-      type: 'SYSTEM',
-      title: approved ? `✅ Produit approuvé : ${product.name}` : `❌ Produit rejeté : ${product.name}`,
-      body: approved
-        ? `Votre produit "${product.name}" a été approuvé.`
+      type    : 'SYSTEM',
+      title   : approved ? `✅ Produit approuvé : ${product.name}` : `❌ Produit rejeté : ${product.name}`,
+      body    : approved
+        ? `Votre produit "${product.name}" est maintenant visible dans le catalogue.`
         : `Votre produit "${product.name}" a été rejeté.${reason ? ` Raison : ${reason}` : ''}`,
       channels: ['email'],
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId:   adminId,
-        action:   `PRODUCT_${status}`,
-        entity:   'Product',
-        entityId: productId,
-        metadata: { reason, productName: product.name },
-      },
+    await auditLog(adminId, `PRODUCT_${status}`, 'Product', productId, {
+      reason, productName: product.name,
     });
 
     return updated;
   }
 
   // ──────────────────────────────────────────────────────────
-  // UC30 — MODÉRATION DES UTILISATEURS
+  // UTILISATEURS
   // ──────────────────────────────────────────────────────────
 
   async getUsers(query) {
@@ -188,7 +158,7 @@ class AdminService {
     if (role)   where.role   = role;
     if (search) {
       where.OR = [
-        { name:  { contains: search, mode: 'insensitive' } },
+        { name : { contains: search, mode: 'insensitive' } },
         { phone: { contains: search } },
         { email: { contains: search, mode: 'insensitive' } },
       ];
@@ -196,10 +166,8 @@ class AdminService {
 
     const [data, total] = await Promise.all([
       prisma.user.findMany({
-        where,
-        skip,
-        take: limit,
-        select: {
+        where, skip, take: limit,
+        select : {
           id: true, name: true, phone: true, email: true,
           role: true, status: true, trustScore: true, createdAt: true,
           _count: { select: { groupMembers: true, payments: true } },
@@ -213,114 +181,79 @@ class AdminService {
   }
 
   async updateUserStatus(userId, adminId, status, reason = null) {
-    const validStatuses = ['ACTIVE', 'SUSPENDED', 'BANNED'];
-    if (!validStatuses.includes(status)) {
-      const err = new Error('Statut invalide');
-      err.status = 400; throw err;
-    }
-
-    if (userId === adminId) {
-      const err = new Error('Impossible de modifier votre propre statut');
-      err.status = 400; throw err;
-    }
+    checkNotSelf(userId, adminId, 'Impossible de modifier votre propre statut');
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      const err = new Error('Utilisateur introuvable');
-      err.status = 404; throw err;
+      const err = new Error('Utilisateur introuvable'); err.status = 404; throw err;
     }
 
     const updated = await prisma.user.update({
-      where: { id: userId },
-      data:  { status },
+      where : { id: userId },
+      data  : { status },
       select: { id: true, name: true, phone: true, status: true, role: true },
     });
 
-    if (status === 'SUSPENDED' || status === 'BANNED') {
+    if (['SUSPENDED', 'BANNED'].includes(status)) {
       await prisma.session.deleteMany({ where: { userId } });
     }
 
     const messages = {
       SUSPENDED: 'Votre compte a été temporairement suspendu.',
-      BANNED:    'Votre compte a été banni définitivement.',
-      ACTIVE:    'Votre compte a été réactivé.',
+      BANNED   : 'Votre compte a été banni définitivement.',
+      ACTIVE   : 'Votre compte a été réactivé.',
     };
 
     await notificationService.notify(userId, {
-      type:  'SYSTEM',
-      title: 'Information sur votre compte',
-      body:  `${messages[status]}${reason ? ` Raison : ${reason}` : ''}`,
+      type    : 'SYSTEM',
+      title   : 'Information sur votre compte',
+      body    : `${messages[status]}${reason ? ` Raison : ${reason}` : ''}`,
       channels: ['sms', 'email'],
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId:   adminId,
-        action:   `USER_STATUS_${status}`,
-        entity:   'User',
-        entityId: userId,
-        metadata: { reason, previousStatus: user.status },
-      },
+    await auditLog(adminId, `USER_STATUS_${status}`, 'User', userId, {
+      reason, previousStatus: user.status,
     });
 
     return updated;
   }
 
   async updateUserRole(userId, adminId, role) {
-    const validRoles = ['MEMBER', 'SUPPLIER', 'GROUP_LEADER', 'ADMIN'];
-    if (!validRoles.includes(role)) {
-      const err = new Error('Rôle invalide');
-      err.status = 400; throw err;
-    }
-
-    if (userId === adminId) {
-      const err = new Error('Impossible de modifier votre propre rôle');
-      err.status = 400; throw err;
-    }
+    checkNotSelf(userId, adminId, 'Impossible de modifier votre propre rôle');
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      const err = new Error('Utilisateur introuvable');
-      err.status = 404; throw err;
+      const err = new Error('Utilisateur introuvable'); err.status = 404; throw err;
     }
 
     const updated = await prisma.user.update({
-      where: { id: userId },
-      data:  { role },
+      where : { id: userId },
+      data  : { role },
       select: { id: true, name: true, role: true, status: true },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId:   adminId,
-        action:   'USER_ROLE_CHANGED',
-        entity:   'User',
-        entityId: userId,
-        metadata: { previousRole: user.role, newRole: role },
-      },
+    await auditLog(adminId, 'USER_ROLE_CHANGED', 'User', userId, {
+      previousRole: user.role, newRole: role,
     });
 
     return updated;
   }
 
   // ──────────────────────────────────────────────────────────
-  // UC31 — MODÉRATION DES GROUPES
+  // GROUPES
   // ──────────────────────────────────────────────────────────
 
   async getGroups(query) {
     const { page, limit, skip } = getPagination(query);
-    const { status } = query;
-    const where = status ? { status } : {};
+    const where = query.status ? { status: query.status } : {};
 
     const [data, total] = await Promise.all([
       prisma.group.findMany({
-        where,
-        skip,
-        take: limit,
+        where, skip, take: limit,
         include: {
-          product:  { select: { name: true, imagesUrls: true } },
+          product : { select: { name: true, imagesUrls: true } },
           supplier: { include: { user: { select: { name: true } } } },
-          _count:   { select: { members: true } },
+          _count  : { select: { members: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -332,44 +265,34 @@ class AdminService {
 
   async closeGroup(groupId, adminId, reason) {
     const group = await prisma.group.findUnique({
-      where: { id: groupId },
+      where  : { id: groupId },
       include: { product: { select: { name: true } } },
     });
 
     if (!group) {
-      const err = new Error('Groupe introuvable');
-      err.status = 404; throw err;
+      const err = new Error('Groupe introuvable'); err.status = 404; throw err;
     }
-
     if (!['OPEN', 'THRESHOLD_REACHED'].includes(group.status)) {
-      const err = new Error('Ce groupe ne peut pas être fermé (statut : ' + group.status + ')');
+      const err = new Error(`Ce groupe ne peut pas être fermé (statut : ${group.status})`);
       err.status = 409; throw err;
     }
 
     await prisma.group.update({ where: { id: groupId }, data: { status: 'CANCELLED' } });
 
     await notificationService.notifyGroupMembers(groupId, {
-      type:  'GROUP_FAILED',
-      title: '⚠️ Groupe annulé par l\'administration',
-      body:  `Le groupe "${group.product.name}" a été annulé.${reason ? ` Raison : ${reason}` : ''} Vos dépôts seront remboursés sous 72h.`,
+      type    : 'GROUP_FAILED',
+      title   : '⚠️ Groupe annulé par l\'administration',
+      body    : `Le groupe "${group.product.name}" a été annulé.${reason ? ` Raison : ${reason}` : ''} Vos dépôts seront remboursés sous 72h.`,
       channels: ['sms', 'email'],
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId:   adminId,
-        action:   'GROUP_CANCELLED',
-        entity:   'Group',
-        entityId: groupId,
-        metadata: { reason },
-      },
-    });
+    await auditLog(adminId, 'GROUP_CANCELLED', 'Group', groupId, { reason });
 
     return { message: 'Groupe annulé avec succès' };
   }
 
   // ──────────────────────────────────────────────────────────
-  // UC32 — REMBOURSEMENTS
+  // REMBOURSEMENTS
   // ──────────────────────────────────────────────────────────
 
   async getPendingRefunds(query) {
@@ -377,11 +300,10 @@ class AdminService {
 
     const [data, total] = await Promise.all([
       prisma.payment.findMany({
-        where: { status: 'ESCROWED', type: 'DEPOSIT' },
-        skip,
-        take: limit,
+        where  : { status: 'ESCROWED', type: 'DEPOSIT' },
+        skip, take: limit,
         include: {
-          user:  { select: { name: true, phone: true } },
+          user : { select: { name: true, phone: true } },
           group: { include: { product: { select: { name: true } } } },
         },
         orderBy: { createdAt: 'asc' },
@@ -393,48 +315,37 @@ class AdminService {
   }
 
   async processRefund(paymentId, adminId) {
-    const payment = await prisma.payment.findUnique({
-      where:   { id: paymentId },
-      include: { user: { select: { id: true, name: true, phone: true } } },
-    });
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
 
     if (!payment) {
-      const err = new Error('Paiement introuvable');
-      err.status = 404; throw err;
+      const err = new Error('Paiement introuvable'); err.status = 404; throw err;
     }
-
     if (payment.status !== 'ESCROWED') {
-      const err = new Error('Ce paiement n\'est pas remboursable (statut : ' + payment.status + ')');
+      const err = new Error(`Ce paiement n\'est pas remboursable (statut : ${payment.status})`);
       err.status = 409; throw err;
     }
 
     const updated = await prisma.payment.update({
       where: { id: paymentId },
-      data:  { status: 'REFUNDED' },
+      data : { status: 'REFUNDED' },
     });
 
     await notificationService.notify(payment.userId, {
-      type:  'SYSTEM',
-      title: '💰 Remboursement effectué',
-      body:  `Un remboursement de ${payment.amount} FCFA a été effectué sur votre compte.`,
+      type    : 'SYSTEM',
+      title   : '💰 Remboursement effectué',
+      body    : `Un remboursement de ${payment.amount.toLocaleString()} FCFA a été effectué sur votre compte.`,
       channels: ['sms'],
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId:   adminId,
-        action:   'REFUND_PROCESSED',
-        entity:   'Payment',
-        entityId: paymentId,
-        metadata: { amount: payment.amount, userId: payment.userId },
-      },
+    await auditLog(adminId, 'REFUND_PROCESSED', 'Payment', paymentId, {
+      amount: payment.amount, userId: payment.userId,
     });
 
     return updated;
   }
 
   // ──────────────────────────────────────────────────────────
-  // UC33 — ANALYTICS & DASHBOARD
+  // ANALYTICS
   // ──────────────────────────────────────────────────────────
 
   async getDashboard() {
@@ -446,7 +357,7 @@ class AdminService {
       totalOrders, pendingOrders,
       totalProducts, pendingProducts,
       pendingSuppliers,
-      revenueResult, commissionResult,
+      revenueResult, commissionResult, escrowResult,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { status: 'ACTIVE' } }),
@@ -460,39 +371,25 @@ class AdminService {
       prisma.product.count({ where: { status: 'APPROVED' } }),
       prisma.product.count({ where: { status: 'PENDING_APPROVAL' } }),
       prisma.supplier.count({ where: { status: 'PENDING' } }),
-      prisma.payment.aggregate({
-        where: { status: 'COMPLETED', type: 'FINAL_PAYMENT' },
-        _sum:  { amount: true },
-      }),
-      prisma.payment.aggregate({
-        where: { type: 'COMMISSION', status: 'COMPLETED' },
-        _sum:  { amount: true },
-      }),
+      prisma.payment.aggregate({ where: { status: 'COMPLETED', type: 'FINAL_PAYMENT' }, _sum: { amount: true } }),
+      prisma.payment.aggregate({ where: { type: 'COMMISSION', status: 'COMPLETED' },    _sum: { amount: true } }),
+      prisma.payment.aggregate({ where: { status: 'ESCROWED' },                         _sum: { amount: true } }),
     ]);
 
-    const totalRevenue    = revenueResult._sum.amount    || 0;
-    const totalCommission = commissionResult._sum.amount || 0;
-    const successRate     = totalGroups > 0
-      ? ((successGroups / totalGroups) * 100).toFixed(1) : 0;
+    const successRate = totalGroups > 0
+      ? parseFloat(((successGroups / totalGroups) * 100).toFixed(1)) : 0;
 
     return {
-      totalMembers:     totalUsers,
-      activeUsers,
-      newUsersMonth,
-      totalGroups,
-      activeGroups:     openGroups,
-      successGroups,
-      failedGroups,
-      successRate:      parseFloat(successRate),
-      totalOrders,
-      pendingOrders,
-      totalProducts,
-      pendingProducts,
-      pendingSuppliers,
-      totalRevenue,
-      totalCommissions: totalCommission,
-      escrowAmount:     0,
-      openDisputes:     0,
+      users    : { total: totalUsers, active: activeUsers, newThisMonth: newUsersMonth },
+      groups   : { total: totalGroups, open: openGroups, success: successGroups, failed: failedGroups, successRate },
+      orders   : { total: totalOrders, pending: pendingOrders },
+      products : { total: totalProducts, pending: pendingProducts },
+      suppliers: { pending: pendingSuppliers },
+      finances : {
+        totalRevenue    : revenueResult._sum.amount    ?? 0,
+        totalCommissions: commissionResult._sum.amount ?? 0,
+        escrowAmount    : escrowResult._sum.amount     ?? 0,
+      },
     };
   }
 
@@ -500,19 +397,12 @@ class AdminService {
     const last30days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     const [byStatus, recentGroups] = await Promise.all([
-      prisma.group.groupBy({
-        by:    ['status'],
-        _count: { id: true },
-        where: { createdAt: { gte: last30days } },
-      }),
+      prisma.group.groupBy({ by: ['status'], _count: { id: true }, where: { createdAt: { gte: last30days } } }),
       prisma.group.findMany({
-        where:   { createdAt: { gte: last30days } },
-        include: {
-          product: { select: { name: true } },
-          _count:  { select: { members: true } },
-        },
+        where  : { createdAt: { gte: last30days } },
+        include: { product: { select: { name: true } }, _count: { select: { members: true } } },
         orderBy: { createdAt: 'desc' },
-        take:    10,
+        take   : 10,
       }),
     ]);
 
@@ -521,31 +411,16 @@ class AdminService {
 
   async getPaymentsAnalytics() {
     const [byMethod, byType, totalEscrowed] = await Promise.all([
-      prisma.payment.groupBy({
-        by:    ['method', 'status'],
-        _sum:  { amount: true },
-        _count: { id: true },
-      }),
-      prisma.payment.groupBy({
-        by:    ['type'],
-        _sum:  { amount: true },
-        _count: { id: true },
-      }),
-      prisma.payment.aggregate({
-        where: { status: 'ESCROWED' },
-        _sum:  { amount: true },
-      }),
+      prisma.payment.groupBy({ by: ['method', 'status'], _sum: { amount: true }, _count: { id: true } }),
+      prisma.payment.groupBy({ by: ['type'],             _sum: { amount: true }, _count: { id: true } }),
+      prisma.payment.aggregate({ where: { status: 'ESCROWED' }, _sum: { amount: true } }),
     ]);
 
-    return {
-      byMethod,
-      byType,
-      totalEscrowed: totalEscrowed._sum.amount || 0,
-    };
+    return { byMethod, byType, totalEscrowed: totalEscrowed._sum.amount ?? 0 };
   }
 
   // ──────────────────────────────────────────────────────────
-  // UC37 — MONITORING
+  // MONITORING
   // ──────────────────────────────────────────────────────────
 
   async getSystemHealth() {
@@ -555,21 +430,21 @@ class AdminService {
     const mem = process.memoryUsage();
 
     return {
-      status:    'healthy',
-      timestamp: new Date().toISOString(),
-      uptime:    Math.floor(process.uptime()),
-      database:  { status: 'connected', latencyMs: dbLatency },
-      memory: {
-        heapUsedMB:  Math.round(mem.heapUsed  / 1024 / 1024),
+      status     : dbLatency < 200 ? 'healthy' : 'degraded',
+      timestamp  : new Date().toISOString(),
+      uptime     : Math.floor(process.uptime()),
+      database   : { status: 'connected', latencyMs: dbLatency },
+      memory     : {
+        heapUsedMB : Math.round(mem.heapUsed  / 1024 / 1024),
         heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
-        rssMB:       Math.round(mem.rss       / 1024 / 1024),
+        rssMB      : Math.round(mem.rss       / 1024 / 1024),
       },
       nodeVersion: process.version,
     };
   }
 
   // ──────────────────────────────────────────────────────────
-  // UC38 — AUDIT LOGS
+  // AUDIT LOGS
   // ──────────────────────────────────────────────────────────
 
   async getAuditLogs(query) {
@@ -583,9 +458,7 @@ class AdminService {
 
     const [data, total] = await Promise.all([
       prisma.auditLog.findMany({
-        where,
-        skip,
-        take: limit,
+        where, skip, take: limit,
         include: { user: { select: { name: true, role: true } } },
         orderBy: { createdAt: 'desc' },
       }),
@@ -603,19 +476,14 @@ class AdminService {
       prisma.payment.count(),
     ]);
 
-    await prisma.auditLog.create({
-      data: {
-        userId:   adminId,
-        action:   'GDPR_EXPORT',
-        entity:   'System',
-        metadata: { users, groups, orders, payments },
-      },
+    await auditLog(adminId, 'GDPR_EXPORT', 'System', 'system', {
+      counts: { users, groups, orders, payments },
     });
 
     return {
       exportedAt: new Date().toISOString(),
-      counts:     { users, groups, orders, payments },
-      message:    'Export GDPR initié.',
+      counts    : { users, groups, orders, payments },
+      message   : 'Export GDPR initié.',
     };
   }
 }

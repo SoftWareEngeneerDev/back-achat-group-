@@ -1,122 +1,90 @@
 // ============================================================
 // RATE LIMITING — Protection contre les abus
-// Plateforme Achats Groupés — Burkina Faso
-// ============================================================
-// Deux niveaux de protection :
-// 1. Par IP (pour les routes publiques et non authentifiées)
-// 2. Par userId (pour les routes authentifiées — contourne le changement d'IP)
+// Djula Market — Burkina Faso
 // ============================================================
 
 const rateLimit = require('express-rate-limit');
 
-// ── Fonction pour extraire la clé (IP ou userId) ────────────
-const keyByIP = (req) => req.ip;
-const keyByUser = (req) => req.user?.id || req.ip; // userId si connecté, sinon IP
+// ── Extracteurs de clé ────────────────────────────────────────
+const keyByIP   = (req) => req.ip;
+const keyByUser = (req) => req.user?.id || req.ip;
 
-// ── Message d'erreur standardisé ────────────────────────────
-const rateLimitResponse = (message) => ({
+// ── Message d'erreur standardisé ─────────────────────────────
+const limitMsg = (message) => ({
   success: false,
-  error: {
-    code: 'RATE_LIMIT',
-    message,
-  },
+  error  : { code: 'RATE_LIMIT', message },
 });
 
-// ============================================================
-// GLOBAL — Toutes les routes (par IP)
-// 100 requêtes / 15 minutes
-// ============================================================
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  keyGenerator: keyByIP,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: rateLimitResponse('Trop de requêtes. Réessayez dans 15 minutes.'),
-});
+// ── Factory pour éviter la répétition ────────────────────────
+const makeLimiter = (windowMs, max, keyGenerator, message, skip = undefined) =>
+  rateLimit({
+    windowMs,
+    max,
+    keyGenerator,
+    standardHeaders: true,
+    legacyHeaders  : false,
+    message        : limitMsg(message),
+    ...(skip && { skip }),
+  });
+
+const skipIfNotConnected = (req) => !req.user;
 
 // ============================================================
-// AUTH — Inscription et connexion (par IP)
-// 5 tentatives / minute — anti brute-force
+// LIMITEURS
 // ============================================================
-const authLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 5,
-  keyGenerator: keyByIP,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: rateLimitResponse('Trop de tentatives de connexion. Réessayez dans 1 minute.'),
-});
 
-// ============================================================
-// OTP — Envoi et vérification de codes SMS (par IP)
-// 3 tentatives / minute — anti spam SMS
-// ============================================================
-const otpLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 3,
-  keyGenerator: keyByIP,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: rateLimitResponse('Trop de demandes OTP. Réessayez dans 1 minute.'),
-});
+/** Global — 100 req / 15 min par IP */
+const globalLimiter = makeLimiter(
+  15 * 60 * 1000, 100, keyByIP,
+  'Trop de requêtes. Réessayez dans 15 minutes.'
+);
 
-// ============================================================
-// PAIEMENT — Initiation de paiements (par userId)
-// 10 paiements / heure par utilisateur
-// Empêche le spam de paiements même avec changement d'IP
-// ============================================================
-const paymentLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 heure
-  max: 10,
-  keyGenerator: keyByUser,  // ← Par userId, pas par IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: rateLimitResponse('Trop de tentatives de paiement. Réessayez dans 1 heure.'),
-  skip: (req) => !req.user, // Ignorer si pas connecté (géré par authLimiter)
-});
+/** Auth — 5 tentatives / min par IP (anti brute-force) */
+const authLimiter = makeLimiter(
+  60 * 1000, 5, keyByIP,
+  'Trop de tentatives de connexion. Réessayez dans 1 minute.'
+);
 
-// ============================================================
-// GROUPE — Rejoindre des groupes (par userId)
-// 5 groupes rejoints / heure par utilisateur
-// ============================================================
-const joinGroupLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 heure
-  max: 5,
-  keyGenerator: keyByUser,  // ← Par userId
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: rateLimitResponse('Vous avez rejoint trop de groupes récemment. Réessayez dans 1 heure.'),
-  skip: (req) => !req.user,
-});
+/** OTP — 3 demandes / min par IP (anti spam SMS) */
+const otpLimiter = makeLimiter(
+  60 * 1000, 3, keyByIP,
+  'Trop de demandes OTP. Réessayez dans 1 minute.'
+);
 
-// ============================================================
-// CRÉATION — Créer des ressources (par userId)
-// 20 créations / heure (produits, groupes, avis, litiges)
-// ============================================================
-const createLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 heure
-  max: 20,
-  keyGenerator: keyByUser,  // ← Par userId
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: rateLimitResponse('Trop de créations en peu de temps. Réessayez dans 1 heure.'),
-  skip: (req) => !req.user,
-});
+/** Paiement — 10 / heure par userId */
+const paymentLimiter = makeLimiter(
+  60 * 60 * 1000, 10, keyByUser,
+  'Trop de tentatives de paiement. Réessayez dans 1 heure.',
+  skipIfNotConnected
+);
 
-// ============================================================
-// ADMIN — Routes admin (par userId)
-// 200 requêtes / 15 minutes — plus permissif pour l'admin
-// ============================================================
-const adminLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  keyGenerator: keyByUser,  // ← Par userId admin
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: rateLimitResponse('Trop de requêtes admin. Réessayez dans 15 minutes.'),
-  skip: (req) => !req.user,
-});
+/** Rejoindre groupe — 5 / heure par userId */
+const joinGroupLimiter = makeLimiter(
+  60 * 60 * 1000, 5, keyByUser,
+  'Vous avez rejoint trop de groupes récemment. Réessayez dans 1 heure.',
+  skipIfNotConnected
+);
+
+/** Création (produits, groupes, avis, litiges) — 20 / heure par userId */
+const createLimiter = makeLimiter(
+  60 * 60 * 1000, 20, keyByUser,
+  'Trop de créations en peu de temps. Réessayez dans 1 heure.',
+  skipIfNotConnected
+);
+
+/** Admin — 200 req / 15 min par userId */
+const adminLimiter = makeLimiter(
+  15 * 60 * 1000, 200, keyByUser,
+  'Trop de requêtes admin. Réessayez dans 15 minutes.',
+  skipIfNotConnected
+);
+
+/** Upload — 10 uploads / heure par userId */
+const uploadLimiter = makeLimiter(
+  60 * 60 * 1000, 10, keyByUser,
+  'Trop d\'uploads en peu de temps. Réessayez dans 1 heure.',
+  skipIfNotConnected
+);
 
 module.exports = {
   globalLimiter,
@@ -126,4 +94,5 @@ module.exports = {
   joinGroupLimiter,
   createLimiter,
   adminLimiter,
+  uploadLimiter,
 };
