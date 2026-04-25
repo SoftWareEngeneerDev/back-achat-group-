@@ -1,13 +1,11 @@
 // ============================================================
 // AUTH ROUTES — Base URL : /api/v1/auth
 // ============================================================
-
 const router     = require('express').Router();
 const { body }   = require('express-validator');
 const controller = require('./auth.controller');
 const { validate }    = require('../../middleware/validate');
 const { authLimiter, otpLimiter } = require('../../middleware/rateLimit');
-const { authenticate }            = require('../../middleware/auth');
 
 // POST /auth/register
 router.post('/register',
@@ -41,10 +39,11 @@ router.post('/verify-otp',
   controller.verifyOTP.bind(controller),
 );
 
-// POST /auth/supplier-profile — Met à jour les infos entreprise (JWT requis)
+// POST /auth/supplier-profile
+// CORRECTION : sans JWT — fournisseur identifié par son téléphone
 router.post('/supplier-profile',
-  authenticate,
   [
+    body('phone').notEmpty().withMessage('Numéro de téléphone requis'),
     body('companyName').trim().notEmpty().withMessage('Nom de l\'entreprise requis'),
     body('taxId').optional().isString(),
     body('siret').optional().isString(),
