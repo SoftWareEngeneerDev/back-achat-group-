@@ -1,6 +1,5 @@
 // ============================================================
 // AUTH CONTROLLER — Traitement des requêtes HTTP
-// Plateforme Achats Groupés — Burkina Faso
 // ============================================================
 
 const authService = require('./auth.service');
@@ -25,14 +24,12 @@ class AuthController {
       const user = await authService.verifyOTP(phone, code, type);
 
       if (type === 'REGISTER' || type === 'TWO_FACTOR') {
-        // Si fournisseur → pas de tokens (compte SUSPENDED)
         if (user.role === 'SUPPLIER' && user.status === 'SUSPENDED') {
           return success(res, {
             supplierPending: true,
             message: 'Compte créé. En attente de validation par l\'administration.',
           }, 'OTP vérifié');
         }
-        // Sinon → tokens JWT
         const tokens = await authService.generateTokens(user);
         return success(res, tokens, 'OTP vérifié avec succès');
       }
@@ -42,13 +39,27 @@ class AuthController {
   }
 
   /** POST /auth/supplier-profile
-   *  Met à jour les infos entreprise du fournisseur (après OTP)
-   *  Requiert JWT
+   *  CORRECTION : plus de JWT — on identifie le fournisseur par son téléphone
    */
   async updateSupplierProfile(req, res, next) {
     try {
-      const userId = req.user.id;
-      const result = await authService.updateSupplierProfile(userId, req.body);
+      const { phone, ...profileData } = req.body;
+
+      // Trouver l'utilisateur via son téléphone
+      const user = await prisma.user.findUnique({
+        where: { phone: formatPhone(phone) },
+        select: { id: true, role: true, status: true },
+      });
+
+      if (!user) {
+        return error(res, 'Utilisateur introuvable', 404, 'USER_NOT_FOUND');
+      }
+
+      if (user.role !== 'SUPPLIER') {
+        return error(res, 'Ce compte n\'est pas un compte fournisseur', 403, 'NOT_SUPPLIER');
+      }
+
+      const result = await authService.updateSupplierProfile(user.id, profileData);
       return success(res, result, 'Profil fournisseur mis à jour');
     } catch (err) { next(err); }
   }
