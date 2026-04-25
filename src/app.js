@@ -35,6 +35,7 @@ const httpServer = http.createServer(app);
 // MIDDLEWARES GLOBAUX
 // ============================================================
 app.use(helmet({
+  crossOriginResourcePolicy: false,
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -45,12 +46,17 @@ app.use(helmet({
   },
 }));
 
-app.use(cors({
-  origin:         env.FRONTEND_URL || '*',
+const corsOptions = {
+  origin: env.IS_DEV
+    ? (origin, cb) => cb(null, true)
+    : env.FRONTEND_URL,
   credentials:    true,
   methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+};
+
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
 
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
