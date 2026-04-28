@@ -1,11 +1,45 @@
 // ============================================================
 // USERS SERVICE — Logique métier des utilisateurs
+// Djula Market — Burkina Faso
 // ============================================================
 
 const prisma = require('../../config/database');
 const path   = require('path');
 const fs     = require('fs');
 const { getPagination } = require('../../utils/helpers');
+
+// ── Champs autorisés à la mise à jour du profil ──────────────
+const ALLOWED_UPDATE_FIELDS = [
+  'name', 'email', 'addressLine', 'city',
+  'latitude', 'longitude',
+  'notifEmail', 'notifSMS', 'notifPush', 'avatarUrl',
+];
+
+// ── Sélection profil complet ──────────────────────────────────
+const PROFILE_SELECT = {
+  id: true, email: true, phone: true, name: true,
+  role: true, status: true, avatarUrl: true,
+  addressLine: true, city: true,
+  latitude: true, longitude: true,
+  trustScore: true, referralCode: true,
+  notifEmail: true, notifSMS: true, notifPush: true,
+  twoFactorEnabled: true,
+  createdAt: true, updatedAt: true,
+  supplier: {
+    select: {
+      id: true, companyName: true, status: true,
+      rating: true, reviewCount: true, successRate: true,
+    },
+  },
+  _count: { select: { groupMembers: true, reviews: true } },
+};
+
+// ── Sélection minimale après update ──────────────────────────
+const UPDATE_SELECT = {
+  id: true, name: true, email: true, phone: true,
+  avatarUrl: true, city: true, addressLine: true,
+  notifEmail: true, notifSMS: true, notifPush: true,
+};
 
 class UsersService {
 
@@ -14,39 +48,20 @@ class UsersService {
   // ──────────────────────────────────────────────────────────
 
   async getProfile(userId) {
-    return prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true, email: true, phone: true, name: true,
-        role: true, status: true, avatarUrl: true,
-        addressLine: true, city: true,
-        latitude: true, longitude: true,
-        trustScore: true,
-        notifEmail: true, notifSMS: true, notifPush: true,
-        referralCode: true, twoFactorEnabled: true,
-        createdAt: true, updatedAt: true,
-        supplier: {
-          select: {
-            id: true, companyName: true, status: true,
-            rating: true, reviewCount: true, successRate: true,
-          },
-        },
-        _count: {
-          select: { groupMembers: true, reviews: true },
-        },
-      },
+    const user = await prisma.user.findUnique({
+      where : { id: userId },
+      select: PROFILE_SELECT,
     });
+    if (!user) {
+      const err = new Error('Utilisateur introuvable');
+      err.status = 404; throw err;
+    }
+    return user;
   }
 
   async updateProfile(userId, data) {
-    const allowed = [
-      'name', 'email', 'addressLine', 'city',
-      'latitude', 'longitude',
-      'notifEmail', 'notifSMS', 'notifPush', 'avatarUrl',
-    ];
-
     const updateData = Object.fromEntries(
-      Object.entries(data).filter(([k]) => allowed.includes(k))
+      Object.entries(data).filter(([k]) => ALLOWED_UPDATE_FIELDS.includes(k))
     );
 
     if (updateData.email) {
@@ -60,44 +75,38 @@ class UsersService {
     }
 
     return prisma.user.update({
-      where: { id: userId },
-      data:  updateData,
-      select: {
-        id: true, name: true, email: true, phone: true,
-        avatarUrl: true, city: true, addressLine: true,
-        notifEmail: true, notifSMS: true, notifPush: true,
-      },
+      where : { id: userId },
+      data  : updateData,
+      select: UPDATE_SELECT,
     });
   }
 
   // ──────────────────────────────────────────────────────────
-  // UPLOAD AVATAR ← NOUVEAU
+  // UPLOAD AVATAR
   // ──────────────────────────────────────────────────────────
 
   async uploadAvatar(userId, file) {
-    // ── Créer le dossier uploads si inexistant ────────────────
     const uploadDir = path.join(__dirname, '../../../uploads/avatars');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+    // Supprimer l'ancien avatar
+    const current = await prisma.user.findUnique({
+      where : { id: userId },
+      select: { avatarUrl: true },
+    });
+    if (current?.avatarUrl) {
+      const oldPath = path.join(__dirname, '../../../', current.avatarUrl);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
     }
 
-    // ── Générer un nom de fichier unique ──────────────────────
+    // Sauvegarder le nouveau
     const ext      = path.extname(file.originalname).toLowerCase() || '.jpg';
     const filename = `avatar_${userId}_${Date.now()}${ext}`;
     const filepath = path.join(uploadDir, filename);
-
-    // ── Sauvegarder le fichier ────────────────────────────────
     fs.writeFileSync(filepath, file.buffer);
 
-    // ── URL publique du fichier ───────────────────────────────
     const avatarUrl = `/uploads/avatars/${filename}`;
-
-    // ── Mettre à jour l'URL en base ───────────────────────────
-    await prisma.user.update({
-      where: { id: userId },
-      data:  { avatarUrl },
-    });
-
+    await prisma.user.update({ where: { id: userId }, data: { avatarUrl } });
     return { avatarUrl };
   }
 
@@ -106,62 +115,71 @@ class UsersService {
   // ──────────────────────────────────────────────────────────
 
   async deleteAccount(userId) {
+    // Vérifier groupes actifs
     const activeGroup = await prisma.groupMember.findFirst({
       where: {
         userId,
         status: 'ACTIVE',
-        group: { status: { in: ['OPEN', 'THRESHOLD_REACHED'] } },
+        group : { status: { in: ['OPEN', 'THRESHOLD_REACHED'] } },
       },
     });
-
     if (activeGroup) {
       const err = new Error('Impossible de supprimer votre compte : vous êtes dans un groupe actif.');
       err.status = 409; throw err;
     }
 
-    const timestamp = Date.now();
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        status:          'BANNED',
-        email:           null,
-        phone:           `DELETED_${timestamp}`,
-        name:            'Utilisateur supprimé',
-        avatarUrl:       null,
-        addressLine:     null,
-        twoFactorSecret: null,
-      },
+    // Vérifier paiements en attente
+    const pendingPayment = await prisma.payment.findFirst({
+      where: { userId, status: { in: ['PENDING', 'PROCESSING'] } },
     });
+    if (pendingPayment) {
+      const err = new Error('Impossible de supprimer votre compte : vous avez un paiement en attente.');
+      err.status = 409; throw err;
+    }
 
-    await prisma.session.deleteMany({ where: { userId } });
+    // Anonymiser + supprimer sessions en transaction
+    const timestamp = Date.now();
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data : {
+          status          : 'BANNED',
+          email           : null,
+          phone           : `DELETED_${timestamp}`,
+          name            : 'Utilisateur supprimé',
+          avatarUrl       : null,
+          addressLine     : null,
+          twoFactorSecret : null,
+        },
+      }),
+      prisma.session.deleteMany({ where: { userId } }),
+    ]);
+
     return true;
   }
 
   // ──────────────────────────────────────────────────────────
-  // DASHBOARD
+  // GROUPES DU MEMBRE
   // ──────────────────────────────────────────────────────────
 
   async getMyGroups(userId) {
     const memberships = await prisma.groupMember.findMany({
-      where: { userId },
+      where  : { userId },
       include: {
         group: {
           include: {
-            product:      { select: { id: true, name: true, imagesUrls: true } },
+            product     : { select: { id: true, name: true, imagesUrls: true } },
             pricingTiers: { orderBy: { participantCount: 'asc' } },
-            _count:       { select: { members: true } },
+            supplier    : { select: { id: true, companyName: true } },
+            _count      : { select: { members: true } },
           },
         },
       },
       orderBy: { joinedAt: 'desc' },
     });
 
-    const active = memberships.filter(m =>
-      ['OPEN', 'THRESHOLD_REACHED'].includes(m.group.status)
-    );
-    const completed = memberships.filter(m =>
-      ['CLOSED', 'FAILED', 'CANCELLED'].includes(m.group.status)
-    );
+    const active    = memberships.filter(m => ['OPEN', 'THRESHOLD_REACHED'].includes(m.group.status));
+    const completed = memberships.filter(m => ['CLOSED', 'FAILED', 'CANCELLED'].includes(m.group.status));
 
     return { active, completed, total: memberships.length };
   }
@@ -169,39 +187,24 @@ class UsersService {
   async getHistory(userId, query) {
     const { page, limit, skip } = getPagination(query);
 
-    const [data, total] = await Promise.all([
+    const [data, total, payments] = await Promise.all([
       prisma.groupMember.findMany({
-        where: {
-          userId,
-          group: { status: { in: ['CLOSED', 'FAILED', 'CANCELLED'] } },
-        },
-        include: {
-          group: {
-            include: {
-              product: { select: { id: true, name: true, imagesUrls: true } },
-            },
-          },
-        },
+        where  : { userId, group: { status: { in: ['CLOSED', 'FAILED', 'CANCELLED'] } } },
+        include: { group: { include: { product: { select: { id: true, name: true, imagesUrls: true } } } } },
         orderBy: { joinedAt: 'desc' },
         skip,
         take: limit,
       }),
       prisma.groupMember.count({
-        where: {
-          userId,
-          group: { status: { in: ['CLOSED', 'FAILED', 'CANCELLED'] } },
-        },
+        where: { userId, group: { status: { in: ['CLOSED', 'FAILED', 'CANCELLED'] } } },
+      }),
+      prisma.payment.findMany({
+        where  : { userId },
+        select : { id: true, amount: true, type: true, status: true, method: true, createdAt: true, groupId: true },
+        orderBy: { createdAt: 'desc' },
+        take   : 20,
       }),
     ]);
-
-    const payments = await prisma.payment.findMany({
-      where:   { userId },
-      select: {
-        id: true, amount: true, type: true,
-        status: true, method: true, createdAt: true, groupId: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
 
     return { data, payments, total, page, limit };
   }
@@ -214,12 +217,7 @@ class UsersService {
     const { page, limit, skip } = getPagination(query);
 
     const [data, total, unreadCount] = await Promise.all([
-      prisma.notification.findMany({
-        where:   { userId },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
+      prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, skip, take: limit }),
       prisma.notification.count({ where: { userId } }),
       prisma.notification.count({ where: { userId, isRead: false } }),
     ]);
@@ -228,17 +226,33 @@ class UsersService {
   }
 
   async markNotificationRead(notifId, userId) {
-    return prisma.notification.updateMany({
-      where: { id: notifId, userId },
-      data:  { isRead: true },
-    });
+    const notif = await prisma.notification.findFirst({ where: { id: notifId, userId } });
+    if (!notif) {
+      const err = new Error('Notification introuvable'); err.status = 404; throw err;
+    }
+    return prisma.notification.update({ where: { id: notifId }, data: { isRead: true } });
   }
 
   async markAllNotificationsRead(userId) {
-    return prisma.notification.updateMany({
-      where: { userId, isRead: false },
-      data:  { isRead: true },
-    });
+    return prisma.notification.updateMany({ where: { userId, isRead: false }, data: { isRead: true } });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // STATS MEMBRE
+  // ──────────────────────────────────────────────────────────
+
+  async getMemberStats(userId) {
+    const [groupCount, orderCount, totalSaved] = await Promise.all([
+      prisma.groupMember.count({ where: { userId } }),
+      prisma.order.count({ where: { userId, status: 'DELIVERED' } }),
+      prisma.order.aggregate({ where: { userId, status: 'DELIVERED' }, _sum: { savedAmount: true } }),
+    ]);
+
+    return {
+      totalGroups : groupCount,
+      totalOrders : orderCount,
+      totalSaved  : totalSaved._sum.savedAmount ?? 0,
+    };
   }
 }
 

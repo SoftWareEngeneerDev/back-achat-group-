@@ -1,9 +1,10 @@
 // ============================================================
 // USERS CONTROLLER
+// Djula Market — Burkina Faso
 // ============================================================
 
 const usersService = require('./users.service');
-const { success, paginated, notFound } = require('../../utils/response');
+const { success, created, paginated, badRequest } = require('../../utils/response');
 
 class UsersController {
 
@@ -11,7 +12,6 @@ class UsersController {
   async getProfile(req, res, next) {
     try {
       const user = await usersService.getProfile(req.user.id);
-      if (!user) return notFound(res, 'Utilisateur');
       return success(res, user);
     } catch (err) { next(err); }
   }
@@ -24,18 +24,12 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  /** POST /users/me/avatar ← NOUVEAU */
+  /** POST /users/me/avatar */
   async uploadAvatar(req, res, next) {
     try {
-      if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          error: { message: 'Aucun fichier reçu' }
-        });
-      }
-
+      if (!req.file) return badRequest(res, 'Aucun fichier reçu');
       const result = await usersService.uploadAvatar(req.user.id, req.file);
-      return success(res, result, 'Photo de profil mise à jour');
+      return created(res, result, 'Photo de profil mise à jour');
     } catch (err) { next(err); }
   }
 
@@ -50,8 +44,8 @@ class UsersController {
   /** GET /users/me/groups */
   async getMyGroups(req, res, next) {
     try {
-      const { data, total, page, limit } = await usersService.getMyGroups(req.user.id, req.query);
-      return paginated(res, data, page, limit, total);
+      const result = await usersService.getMyGroups(req.user.id);
+      return success(res, result);
     } catch (err) { next(err); }
   }
 
@@ -60,6 +54,14 @@ class UsersController {
     try {
       const { data, payments, total, page, limit } = await usersService.getHistory(req.user.id, req.query);
       return paginated(res, { memberships: data, payments }, page, limit, total);
+    } catch (err) { next(err); }
+  }
+
+  /** GET /users/me/stats */
+  async getStats(req, res, next) {
+    try {
+      const stats = await usersService.getMemberStats(req.user.id);
+      return success(res, stats);
     } catch (err) { next(err); }
   }
 
