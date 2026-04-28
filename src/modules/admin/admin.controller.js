@@ -8,42 +8,7 @@ const { success, paginated } = require('../../utils/response');
 
 class AdminController {
 
-  // ── Fournisseurs ──────────────────────────────────────────
-
-  async getSuppliers(req, res, next) {
-    try {
-      const { data, total, page, limit } = await adminService.getSuppliers(req.query);
-      return paginated(res, data, page, limit, total);
-    } catch (err) { next(err); }
-  }
-
-  async validateSupplier(req, res, next) {
-    try {
-      const { approved, reason } = req.body;
-      const result = await adminService.validateSupplier(req.params.id, req.user.id, approved, reason);
-      return success(res, result, `Fournisseur ${approved ? 'approuvé' : 'rejeté'} avec succès`);
-    } catch (err) { next(err); }
-  }
-
-  // ── Produits ──────────────────────────────────────────────
-
-  async getPendingProducts(req, res, next) {
-    try {
-      const { data, total, page, limit } = await adminService.getPendingProducts(req.query);
-      return paginated(res, data, page, limit, total);
-    } catch (err) { next(err); }
-  }
-
-  async validateProduct(req, res, next) {
-    try {
-      const { approved, reason } = req.body;
-      const result = await adminService.validateProduct(req.params.id, req.user.id, approved, reason);
-      return success(res, result, `Produit ${approved ? 'approuvé' : 'rejeté'} avec succès`);
-    } catch (err) { next(err); }
-  }
-
   // ── Utilisateurs ──────────────────────────────────────────
-
   async getUsers(req, res, next) {
     try {
       const { data, total, page, limit } = await adminService.getUsers(req.query);
@@ -55,20 +20,50 @@ class AdminController {
     try {
       const { status, reason } = req.body;
       const result = await adminService.updateUserStatus(req.params.id, req.user.id, status, reason);
-      return success(res, result, `Statut utilisateur mis à jour : ${status}`);
+      return success(res, result, `Statut mis à jour : ${status}`);
     } catch (err) { next(err); }
   }
 
   async updateUserRole(req, res, next) {
     try {
-      const { role } = req.body;
-      const result = await adminService.updateUserRole(req.params.id, req.user.id, role);
-      return success(res, result, `Rôle mis à jour : ${role}`);
+      const result = await adminService.updateUserRole(req.params.id, req.user.id, req.body.role);
+      return success(res, result, `Rôle mis à jour : ${req.body.role}`);
     } catch (err) { next(err); }
   }
 
-  // ── Groupes ───────────────────────────────────────────────
+  // ── Fournisseurs ───────────────────────────────────────────
+  async getSuppliers(req, res, next) {
+    try {
+      const { data, total, page, limit } = await adminService.getSuppliers(req.query);
+      return paginated(res, data, page, limit, total);
+    } catch (err) { next(err); }
+  }
 
+  async validateSupplier(req, res, next) {
+    try {
+      const { approved, reason } = req.body;
+      const result = await adminService.validateSupplier(req.params.id, req.user.id, approved, reason);
+      return success(res, result, `Fournisseur ${approved ? 'approuvé' : 'rejeté'}`);
+    } catch (err) { next(err); }
+  }
+
+  // ── Produits ───────────────────────────────────────────────
+  async getPendingProducts(req, res, next) {
+    try {
+      const { data, total, page, limit } = await adminService.getPendingProducts(req.query);
+      return paginated(res, data, page, limit, total);
+    } catch (err) { next(err); }
+  }
+
+  async validateProduct(req, res, next) {
+    try {
+      const { approved, reason } = req.body;
+      const result = await adminService.validateProduct(req.params.id, req.user.id, approved, reason);
+      return success(res, result, `Produit ${approved ? 'approuvé' : 'rejeté'}`);
+    } catch (err) { next(err); }
+  }
+
+  // ── Groupes ────────────────────────────────────────────────
   async getGroups(req, res, next) {
     try {
       const { data, total, page, limit } = await adminService.getGroups(req.query);
@@ -83,8 +78,29 @@ class AdminController {
     } catch (err) { next(err); }
   }
 
-  // ── Remboursements ────────────────────────────────────────
+  // ── Litiges ────────────────────────────────────────────────
+  async getDisputes(req, res, next) {
+    try {
+      const { data, total, page, limit } = await adminService.getDisputes(req.query);
+      return paginated(res, data, page, limit, total);
+    } catch (err) { next(err); }
+  }
 
+  async takeChargeDispute(req, res, next) {
+    try {
+      const result = await adminService.takeChargeDispute(req.params.id, req.user.id);
+      return success(res, result, 'Litige pris en charge');
+    } catch (err) { next(err); }
+  }
+
+  async resolveDispute(req, res, next) {
+    try {
+      const result = await adminService.resolveDispute(req.params.id, req.user.id, req.body.resolution);
+      return success(res, result, 'Litige résolu — membre notifié');
+    } catch (err) { next(err); }
+  }
+
+  // ── Remboursements ─────────────────────────────────────────
   async getPendingRefunds(req, res, next) {
     try {
       const { data, total, page, limit } = await adminService.getPendingRefunds(req.query);
@@ -95,12 +111,18 @@ class AdminController {
   async processRefund(req, res, next) {
     try {
       const result = await adminService.processRefund(req.params.id, req.user.id);
-      return success(res, result, 'Remboursement traité avec succès');
+      return success(res, result, 'Remboursement traité');
     } catch (err) { next(err); }
   }
 
-  // ── Analytics ─────────────────────────────────────────────
+  async refundPayment(req, res, next) {
+    try {
+      const result = await adminService.processRefund(req.body.paymentId, req.user.id);
+      return success(res, result, 'Remboursement effectué');
+    } catch (err) { next(err); }
+  }
 
+  // ── Analytics ──────────────────────────────────────────────
   async getDashboard(req, res, next) {
     try {
       const result = await adminService.getDashboard();
@@ -122,8 +144,7 @@ class AdminController {
     } catch (err) { next(err); }
   }
 
-  // ── Monitoring & Audit ────────────────────────────────────
-
+  // ── Monitoring ─────────────────────────────────────────────
   async getSystemHealth(req, res, next) {
     try {
       const result = await adminService.getSystemHealth();
