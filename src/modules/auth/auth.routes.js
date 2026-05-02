@@ -7,13 +7,57 @@ const controller = require('./auth.controller');
 const { validate }    = require('../../middleware/validate');
 const { authLimiter, otpLimiter } = require('../../middleware/rateLimit');
 
-// POST /auth/register
+/**
+ * @swagger
+ * tags:
+ *   name: Auth
+ *   description: 🔐 Authentification — Inscription, connexion, OTP
+ */
+
+/**
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Inscription d'un nouveau membre ou fournisseur
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone, name, password]
+ *             properties:
+ *               phone:       { type: string, example: "+22676528609" }
+ *               name:        { type: string, example: "Kofi Traoré" }
+ *               password:    { type: string, minLength: 8, example: "motdepasse123" }
+ *               email:       { type: string, format: email }
+ *               referralCode:{ type: string, example: "KOFI7A2F" }
+ *               role:        { type: string, enum: [MEMBER, SUPPLIER], default: MEMBER }
+ *     responses:
+ *       201:
+ *         description: Compte créé — OTP envoyé par SMS
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     phone: { type: string, example: "+22676528609" }
+ *       409:
+ *         $ref: '#/components/responses/Conflict'
+ *       429:
+ *         $ref: '#/components/responses/TooManyRequests'
+ */
 router.post('/register',
   authLimiter,
   [
     body('phone').notEmpty().withMessage('Numéro de téléphone requis'),
-    body('name').trim().notEmpty().withMessage('Nom requis')
-      .isLength({ min: 2 }).withMessage('Nom trop court'),
+    body('name').trim().notEmpty().withMessage('Nom requis').isLength({ min: 2 }).withMessage('Nom trop court'),
     body('password').isLength({ min: 8 }).withMessage('Mot de passe minimum 8 caractères'),
     body('email').optional().isEmail().withMessage('Format email invalide'),
     body('referralCode').optional().isString(),
@@ -23,24 +67,76 @@ router.post('/register',
   controller.register.bind(controller),
 );
 
-// POST /auth/verify-otp
+/**
+ * @swagger
+ * /auth/verify-otp:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Vérifier le code OTP reçu par SMS
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone, code]
+ *             properties:
+ *               phone: { type: string, example: "+22676528609" }
+ *               code:  { type: string, example: "123456" }
+ *               type:  { type: string, enum: [REGISTER, LOGIN, RESET_PASSWORD, TWO_FACTOR], default: REGISTER }
+ *     responses:
+ *       200:
+ *         description: OTP vérifié — tokens retournés
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:    { $ref: '#/components/schemas/AuthResponse' }
+ *       400:
+ *         description: Code OTP invalide ou expiré
+ *       429:
+ *         $ref: '#/components/responses/TooManyRequests'
+ */
 router.post('/verify-otp',
   otpLimiter,
   [
     body('phone').notEmpty().withMessage('Numéro de téléphone requis'),
-    body('code')
-      .isLength({ min: 6, max: 6 }).withMessage('Code OTP à 6 chiffres')
-      .isNumeric().withMessage('Code OTP invalide'),
-    body('type').optional()
-      .isIn(['REGISTER', 'LOGIN', 'RESET_PASSWORD', 'TWO_FACTOR'])
-      .withMessage('Type OTP invalide'),
+    body('code').isLength({ min: 6, max: 6 }).isNumeric().withMessage('Code OTP invalide'),
+    body('type').optional().isIn(['REGISTER', 'LOGIN', 'RESET_PASSWORD', 'TWO_FACTOR']),
   ],
   validate,
   controller.verifyOTP.bind(controller),
 );
 
-// POST /auth/supplier-profile
-// CORRECTION : sans JWT — fournisseur identifié par son téléphone
+/**
+ * @swagger
+ * /auth/supplier-profile:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Compléter le profil fournisseur après inscription
+ *     description: Appelé après verify-otp pour les comptes fournisseur. Identifié par téléphone (pas de JWT requis).
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone, companyName]
+ *             properties:
+ *               phone:       { type: string, example: "+22676528609" }
+ *               companyName: { type: string, example: "Tech Ouaga SARL" }
+ *               taxId:       { type: string }
+ *               siret:       { type: string }
+ *               city:        { type: string, example: "Ouagadougou" }
+ *               address:     { type: string }
+ *     responses:
+ *       200:
+ *         description: Profil fournisseur créé — en attente de validation admin
+ */
 router.post('/supplier-profile',
   [
     body('phone').notEmpty().withMessage('Numéro de téléphone requis'),
@@ -54,7 +150,27 @@ router.post('/supplier-profile',
   controller.updateSupplierProfile.bind(controller),
 );
 
-// POST /auth/resend-otp
+/**
+ * @swagger
+ * /auth/resend-otp:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Renvoyer un code OTP par SMS
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone]
+ *             properties:
+ *               phone: { type: string, example: "+22676528609" }
+ *               type:  { type: string, enum: [REGISTER, RESET_PASSWORD], default: REGISTER }
+ *     responses:
+ *       200: { description: OTP renvoyé }
+ *       429: { $ref: '#/components/responses/TooManyRequests' }
+ */
 router.post('/resend-otp',
   otpLimiter,
   [
@@ -65,7 +181,37 @@ router.post('/resend-otp',
   controller.resendOTP.bind(controller),
 );
 
-// POST /auth/login
+/**
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Connexion avec téléphone/email + mot de passe
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [password]
+ *             properties:
+ *               phone:    { type: string, example: "+22676528609" }
+ *               email:    { type: string, format: email }
+ *               password: { type: string, example: "motdepasse123" }
+ *     responses:
+ *       200:
+ *         description: Connexion réussie
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:    { $ref: '#/components/schemas/AuthResponse' }
+ *       401: { description: Identifiants incorrects }
+ *       429: { $ref: '#/components/responses/TooManyRequests' }
+ */
 router.post('/login',
   authLimiter,
   [
@@ -79,17 +225,84 @@ router.post('/login',
   controller.login.bind(controller),
 );
 
-// POST /auth/refresh
+/**
+ * @swagger
+ * /auth/refresh:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Renouveler le token d'accès via refresh token
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken: { type: string }
+ *     responses:
+ *       200:
+ *         description: Nouveau token généré
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     accessToken : { type: string }
+ *                     refreshToken: { type: string }
+ *                     expiresIn   : { type: integer, example: 900 }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
 router.post('/refresh',
   [body('refreshToken').notEmpty().withMessage('Refresh token requis')],
   validate,
   controller.refresh.bind(controller),
 );
 
-// POST /auth/logout
+/**
+ * @swagger
+ * /auth/logout:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Déconnexion — invalide le refresh token
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken: { type: string }
+ *     responses:
+ *       200: { description: Déconnexion réussie }
+ */
 router.post('/logout', controller.logout.bind(controller));
 
-// POST /auth/forgot-password
+/**
+ * @swagger
+ * /auth/forgot-password:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Demander un code OTP pour réinitialiser le mot de passe
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone]
+ *             properties:
+ *               phone: { type: string, example: "+22676528609" }
+ *     responses:
+ *       200: { description: OTP envoyé par SMS }
+ *       404: { $ref: '#/components/responses/NotFound' }
+ *       429: { $ref: '#/components/responses/TooManyRequests' }
+ */
 router.post('/forgot-password',
   otpLimiter,
   [body('phone').notEmpty().withMessage('Numéro de téléphone requis')],
@@ -97,7 +310,28 @@ router.post('/forgot-password',
   controller.forgotPassword.bind(controller),
 );
 
-// POST /auth/reset-password
+/**
+ * @swagger
+ * /auth/reset-password:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Réinitialiser le mot de passe avec le code OTP
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone, code, newPassword]
+ *             properties:
+ *               phone:       { type: string, example: "+22676528609" }
+ *               code:        { type: string, example: "123456" }
+ *               newPassword: { type: string, minLength: 8 }
+ *     responses:
+ *       200: { description: Mot de passe réinitialisé }
+ *       400: { description: Code OTP invalide ou expiré }
+ */
 router.post('/reset-password',
   [
     body('phone').notEmpty(),

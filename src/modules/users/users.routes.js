@@ -2,90 +2,249 @@
 // USERS ROUTES — Profil et dashboard utilisateur
 // Base URL : /api/v1/users
 // ============================================================
-
-const router = require('express').Router();
-const multer = require('multer');
-const path   = require('path');
+const router  = require('express').Router();
+const multer  = require('multer');
+const path    = require('path');
 const { body, param } = require('express-validator');
-
 const controller        = require('./users.controller');
 const { validate, sanitizeBody } = require('../../middleware/validate');
 const { authenticate }  = require('../../middleware/auth');
 const { uploadLimiter } = require('../../middleware/rateLimit');
 
-// ── Multer — upload avatar en mémoire ────────────────────────
 const upload = multer({
   storage   : multer.memoryStorage(),
-  limits    : { fileSize: 5 * 1024 * 1024 }, // 5 MB max
+  limits    : { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
     const ext     = path.extname(file.originalname).toLowerCase();
-    allowed.includes(ext)
-      ? cb(null, true)
-      : cb(new Error('Format non supporté. Utilisez JPG, PNG ou WebP.'));
+    allowed.includes(ext) ? cb(null, true) : cb(new Error('Format non supporté.'));
   },
 });
 
-// ── Validation profil ─────────────────────────────────────────
 const profileValidators = [
-  body('name').optional().trim().isLength({ min: 2 }).withMessage('Nom trop court (min. 2 caractères)'),
-  body('email').optional().isEmail().normalizeEmail().withMessage('Email invalide'),
+  body('name').optional().trim().isLength({ min: 2 }),
+  body('email').optional().isEmail().normalizeEmail(),
   body('city').optional().trim().isLength({ max: 100 }),
   body('addressLine').optional().trim().isLength({ max: 200 }),
-  body('notifEmail').optional().isBoolean().withMessage('Valeur booléenne attendue'),
-  body('notifSMS').optional().isBoolean().withMessage('Valeur booléenne attendue'),
-  body('notifPush').optional().isBoolean().withMessage('Valeur booléenne attendue'),
+  body('notifEmail').optional().isBoolean(),
+  body('notifSMS').optional().isBoolean(),
+  body('notifPush').optional().isBoolean(),
 ];
 
-// ============================================================
-// PROFIL
-// ============================================================
+/**
+ * @swagger
+ * tags:
+ *   name: Users
+ *   description: 👤 Utilisateurs — Profil, dashboard, notifications
+ */
 
-// GET    /users/me
-router.get('/users/me', authenticate, controller.getProfile.bind(controller));
-
-// PUT    /users/me
-router.put('/users/me',
-  authenticate, sanitizeBody, profileValidators, validate,
-  controller.updateProfile.bind(controller)
-);
-
-// POST   /users/me/avatar
-router.post('/users/me/avatar',
-  authenticate, uploadLimiter, upload.single('avatar'),
-  controller.uploadAvatar.bind(controller)
-);
-
-// DELETE /users/me
+/**
+ * @swagger
+ * /users/me:
+ *   get:
+ *     tags: [Users]
+ *     summary: Obtenir son profil complet
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Profil utilisateur
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:    { $ref: '#/components/schemas/User' }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ *   put:
+ *     tags: [Users]
+ *     summary: Modifier son profil
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:       { type: string, example: "Kofi Traoré" }
+ *               email:      { type: string, format: email }
+ *               city:       { type: string, example: "Ouagadougou" }
+ *               addressLine:{ type: string }
+ *               notifEmail: { type: boolean }
+ *               notifSMS:   { type: boolean }
+ *               notifPush:  { type: boolean }
+ *     responses:
+ *       200:
+ *         description: Profil mis à jour
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:    { $ref: '#/components/schemas/User' }
+ *   delete:
+ *     tags: [Users]
+ *     summary: Supprimer son compte
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       204: { description: Compte supprimé }
+ */
+router.get   ('/users/me', authenticate, controller.getProfile.bind(controller));
+router.put   ('/users/me', authenticate, sanitizeBody, profileValidators, validate, controller.updateProfile.bind(controller));
 router.delete('/users/me', authenticate, controller.deleteAccount.bind(controller));
 
-// ============================================================
-// DASHBOARD
-// ============================================================
+/**
+ * @swagger
+ * /users/me/avatar:
+ *   post:
+ *     tags: [Users]
+ *     summary: Uploader son avatar (JPG, PNG, WebP — max 5MB)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               avatar:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Avatar mis à jour
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success  : { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     avatarUrl: { type: string }
+ */
+router.post('/users/me/avatar', authenticate, uploadLimiter, upload.single('avatar'), controller.uploadAvatar.bind(controller));
 
-// GET /users/me/groups
+/**
+ * @swagger
+ * /users/me/groups:
+ *   get:
+ *     tags: [Users]
+ *     summary: Mes groupes d'achat (actifs et historique)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Liste des groupes rejoints
+ */
 router.get('/users/me/groups', authenticate, controller.getMyGroups.bind(controller));
 
-// GET /users/me/history
+/**
+ * @swagger
+ * /users/me/history:
+ *   get:
+ *     tags: [Users]
+ *     summary: Historique complet (commandes + paiements)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/pageParam'
+ *       - $ref: '#/components/parameters/limitParam'
+ *     responses:
+ *       200: { description: Historique paginé }
+ */
 router.get('/users/me/history', authenticate, controller.getHistory.bind(controller));
 
-// GET /users/me/stats
+/**
+ * @swagger
+ * /users/me/stats:
+ *   get:
+ *     tags: [Users]
+ *     summary: Statistiques personnelles (économies, groupes, etc.)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Statistiques utilisateur
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalGroups  : { type: integer }
+ *                     totalSaved   : { type: number }
+ *                     totalOrders  : { type: integer }
+ *                     referralCount: { type: integer }
+ *                     trustScore   : { type: number }
+ */
 router.get('/users/me/stats', authenticate, controller.getStats.bind(controller));
 
-// ============================================================
-// NOTIFICATIONS
-// ============================================================
-
-// GET   /users/me/notifications
+/**
+ * @swagger
+ * /users/me/notifications:
+ *   get:
+ *     tags: [Users]
+ *     summary: Mes notifications paginées
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/pageParam'
+ *       - $ref: '#/components/parameters/limitParam'
+ *     responses:
+ *       200:
+ *         description: Liste paginée des notifications
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/Notification' }
+ *                 meta: { $ref: '#/components/schemas/Pagination' }
+ */
 router.get('/users/me/notifications', authenticate, controller.getMyNotifications.bind(controller));
 
-// PATCH /users/me/notifications/read-all ← AVANT /:id/read pour éviter conflit de routes
-router.patch('/users/me/notifications/read-all',
-  authenticate,
-  controller.markAllNotificationsRead.bind(controller)
-);
+/**
+ * @swagger
+ * /users/me/notifications/read-all:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Marquer toutes les notifications comme lues
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: { description: Toutes les notifications marquées comme lues }
+ */
+router.patch('/users/me/notifications/read-all', authenticate, controller.markAllNotificationsRead.bind(controller));
 
-// PATCH /users/me/notifications/:id/read
+/**
+ * @swagger
+ * /users/me/notifications/{id}/read:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Marquer une notification comme lue
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Notification marquée comme lue }
+ *       404: { $ref: '#/components/responses/NotFound' }
+ */
 router.patch('/users/me/notifications/:id/read',
   authenticate,
   [param('id').notEmpty().withMessage('ID notification requis')],
