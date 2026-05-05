@@ -206,6 +206,19 @@ router.delete('/groups/:id/leave', authenticate, [groupIdParam], validate, contr
 /**
  * @swagger
  * /supplier/groups:
+ *   get:
+ *     tags: [Supplier]
+ *     summary: Mes groupes créés
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/pageParam'
+ *       - $ref: '#/components/parameters/limitParam'
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [OPEN, THRESHOLD_REACHED, CLOSED, FAILED, CANCELLED] }
+ *     responses:
+ *       200: { description: Liste de mes groupes }
  *   post:
  *     tags: [Supplier]
  *     summary: Créer un nouveau groupe d'achat
@@ -235,6 +248,7 @@ router.delete('/groups/:id/leave', authenticate, [groupIdParam], validate, contr
  *       201: { description: Groupe créé }
  *       429: { $ref: '#/components/responses/TooManyRequests' }
  */
+router.get('/supplier/groups', authenticate, requireSupplier, controller.getMyGroups.bind(controller));
 router.post('/supplier/groups', authenticate, requireSupplier, createLimiter, sanitizeBody, createGroupValidators, validate, controller.createGroup.bind(controller));
 
 /**

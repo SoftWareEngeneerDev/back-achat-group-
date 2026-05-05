@@ -59,6 +59,14 @@ class GroupsController {
   // ── Routes fournisseur ────────────────────────────────────
 
   /** POST /supplier/groups */
+
+  async getMyGroups(req, res, next) {
+    try {
+      const { data, total, page, limit } = await groupsService.getMyGroups(req.user.id, req.query);
+      return paginated(res, data, page, limit, total);
+    } catch (err) { next(err); }
+  }
+
   async createGroup(req, res, next) {
     try {
       const group = await groupsService.createGroup(req.user.id, req.body, false);

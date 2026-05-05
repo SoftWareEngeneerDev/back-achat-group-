@@ -23,6 +23,8 @@ const notificationService = require('../notifications/notification.service');
 // ── Sélections réutilisables ─────────────────────────────────
 const GROUP_INCLUDE = {
   product     : { select: { id: true, name: true, imagesUrls: true, soloPrice: true } },
+  supplier    : { select: { id: true, companyName: true, rating: true, city: true,
+                    user: { select: { name: true, phone: true } } } },
   pricingTiers: { orderBy: { participantCount: 'asc' } },
   _count      : { select: { members: { where: { status: 'ACTIVE' } } } },
 };
@@ -32,6 +34,16 @@ const GROUP_DETAIL_INCLUDE = {
     include: {
       category: true,
       supplier: { select: { companyName: true, rating: true } },
+    },
+  },
+  supplier: {
+    select: {
+      id         : true,
+      companyName: true,
+      rating     : true,
+      city       : true,
+      description: true,
+      user       : { select: { name: true, phone: true } },
     },
   },
   pricingTiers: { orderBy: { participantCount: 'asc' } },
@@ -138,6 +150,40 @@ class GroupsService {
   // ──────────────────────────────────────────────────────────
   // CRÉATION ET MODIFICATION
   // ──────────────────────────────────────────────────────────
+
+
+  /**
+   * Groupes créés par le fournisseur connecté
+   */
+  async getMyGroups(userId, query) {
+    const { page, limit, skip } = getPagination(query);
+
+    const supplier = await prisma.supplier.findFirst({ where: { userId } });
+    if (!supplier) {
+      const err = new Error('Profil fournisseur introuvable');
+      err.status = 403; throw err;
+    }
+
+    const where = { supplierId: supplier.id };
+    if (query.status) where.status = query.status;
+
+    const [data, total] = await Promise.all([
+      prisma.group.findMany({
+        where,
+        skip,
+        take   : limit,
+        include: {
+          product     : { select: { id: true, name: true, imagesUrls: true, soloPrice: true } },
+          pricingTiers: { orderBy: { participantCount: 'asc' } },
+          _count      : { select: { members: { where: { status: 'ACTIVE' } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.group.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
 
   /**
    * Créer un groupe d'achat (fournisseur ou admin)
