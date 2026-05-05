@@ -44,10 +44,6 @@ app.use(helmet({
       imgSrc     : ["'self'", "data:", "https://validator.swagger.io", `http://localhost:${env.PORT}`],
     },
   },
-<<<<<<< HEAD
-=======
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
->>>>>>> fc6688000a1441626b5372ab8b127d4def9d2ef0
 }));
 
 const corsOptions = {
