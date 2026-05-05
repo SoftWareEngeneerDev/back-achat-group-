@@ -15,12 +15,14 @@ const {
 } = require('../../utils/helpers');
 const notificationService = require('../notifications/notification.service');
 
+// ── Helper auditLog ───────────────────────────────────────────
+const auditLog = (userId, action, entity, entityId, metadata = {}) =>
+  prisma.auditLog.create({
+    data: { userId, action, entity, entityId, metadata },
+  }).catch(() => {});
+
 class AuthService {
 
-  // ──────────────────────────────────────────────────────────
-  // INSCRIPTION
-  // role = 'MEMBER' (défaut) ou 'SUPPLIER'
-  // ──────────────────────────────────────────────────────────
   async register({ phone, email, name, password, referralCode, role = 'MEMBER' }) {
     const formattedPhone = formatPhone(phone);
 
@@ -64,13 +66,13 @@ class AuthService {
       },
     });
 
+    // ✅ Log inscription
+    await auditLog(user.id, 'USER_REGISTER', 'User', user.id, { role: user.role, phone: formattedPhone });
+
     await this.sendOTP(user.id, formattedPhone, 'REGISTER');
     return user;
   }
 
-  // ──────────────────────────────────────────────────────────
-  // VÉRIFICATION OTP
-  // ──────────────────────────────────────────────────────────
   async verifyOTP(phone, code, type) {
     const formattedPhone = formatPhone(phone);
 
@@ -99,14 +101,9 @@ class AuthService {
 
     if (type === 'REGISTER') {
       if (user.role === 'SUPPLIER') {
-        // ── Fournisseur → SUSPENDED en attente validation admin ──
-        await prisma.user.update({
-          where: { id: user.id },
-          data:  { status: 'SUSPENDED' },
-        });
+        await prisma.user.update({ where: { id: user.id }, data: { status: 'SUSPENDED' } });
         user.status = 'SUSPENDED';
 
-        // ── Créer profil Supplier automatiquement ────────────────
         const existing = await prisma.supplier.findUnique({ where: { userId: user.id } });
         if (!existing) {
           await prisma.supplier.create({
@@ -120,7 +117,6 @@ class AuthService {
           });
         }
 
-        // ── Notifier les admins ───────────────────────────────────
         const admins = await prisma.user.findMany({ where: { role: 'ADMIN' } });
         for (const admin of admins) {
           await notificationService.notify(admin.id, {
@@ -131,23 +127,21 @@ class AuthService {
           }).catch(() => {});
         }
 
+        // ✅ Log fournisseur inscrit
+        await auditLog(user.id, 'SUPPLIER_REGISTERED', 'Supplier', user.id, { name: user.name });
+
       } else {
-        // ── Membre → ACTIVE directement ──────────────────────────
-        await prisma.user.update({
-          where: { id: user.id },
-          data:  { status: 'ACTIVE' },
-        });
+        await prisma.user.update({ where: { id: user.id }, data: { status: 'ACTIVE' } });
         user.status = 'ACTIVE';
+
+        // ✅ Log membre activé
+        await auditLog(user.id, 'USER_VERIFIED', 'User', user.id, { phone: formattedPhone });
       }
     }
 
     return user;
   }
 
-  // ──────────────────────────────────────────────────────────
-  // MISE À JOUR PROFIL FOURNISSEUR
-  // Appelé après OTP pour compléter les infos entreprise
-  // ──────────────────────────────────────────────────────────
   async updateSupplierProfile(userId, { companyName, taxId, siret, city, address }) {
     const supplier = await prisma.supplier.upsert({
       where:  { userId },
@@ -177,9 +171,6 @@ class AuthService {
     return supplier;
   }
 
-  // ──────────────────────────────────────────────────────────
-  // ENVOI OTP
-  // ──────────────────────────────────────────────────────────
   async sendOTP(userId, phone, type) {
     await prisma.otpCode.updateMany({
       where: { userId, type, used: false },
@@ -201,9 +192,6 @@ class AuthService {
     return true;
   }
 
-  // ──────────────────────────────────────────────────────────
-  // CONNEXION
-  // ──────────────────────────────────────────────────────────
   async login({ phone, email, password }) {
     const formattedPhone = phone ? formatPhone(phone) : null;
 
@@ -221,10 +209,12 @@ class AuthService {
       err.status = 403; err.code = 'PENDING_VERIFICATION'; throw err;
     }
     if (user.status === 'SUSPENDED' && user.role === 'SUPPLIER') {
-      const err = new Error('Votre compte fournisseur est en attente de validation. Vous recevrez un SMS dès activation.');
+      const err = new Error('Votre compte fournisseur est en attente de validation.');
       err.status = 403; err.code = 'SUPPLIER_PENDING'; throw err;
     }
     if (user.status === 'SUSPENDED') {
+      // ✅ Log tentative connexion compte suspendu
+      await auditLog(user.id, 'LOGIN_BLOCKED_SUSPENDED', 'User', user.id);
       const err = new Error('Compte temporairement suspendu');
       err.status = 403; err.code = 'SUSPENDED'; throw err;
     }
@@ -235,6 +225,8 @@ class AuthService {
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
+      // ✅ Log échec connexion
+      await auditLog(user.id, 'LOGIN_FAILED', 'User', user.id, { reason: 'wrong_password' });
       const err = new Error('Identifiants incorrects');
       err.status = 401; throw err;
     }
@@ -244,12 +236,12 @@ class AuthService {
       return { twoFactorRequired: true, userId: user.id };
     }
 
+    // ✅ Log connexion réussie
+    await auditLog(user.id, 'USER_LOGIN', 'User', user.id, { role: user.role });
+
     return this.generateTokens(user);
   }
 
-  // ──────────────────────────────────────────────────────────
-  // TOKENS
-  // ──────────────────────────────────────────────────────────
   async generateTokens(user) {
     const payload = { sub: user.id, role: user.role };
 
@@ -306,17 +298,20 @@ class AuthService {
 
   async logout(refreshToken) {
     if (refreshToken) {
+      // ✅ Log déconnexion
+      const session = await prisma.session.findUnique({ where: { refreshToken } }).catch(() => null);
+      if (session) {
+        await auditLog(session.userId, 'USER_LOGOUT', 'User', session.userId);
+      }
       await prisma.session.deleteMany({ where: { refreshToken } });
     }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // MOT DE PASSE
-  // ──────────────────────────────────────────────────────────
   async forgotPassword(phone) {
     const formattedPhone = formatPhone(phone);
     const user = await prisma.user.findUnique({ where: { phone: formattedPhone } });
     if (!user) return;
+    await auditLog(user.id, 'PASSWORD_RESET_REQUESTED', 'User', user.id);
     await this.sendOTP(user.id, formattedPhone, 'RESET_PASSWORD');
   }
 
@@ -325,6 +320,8 @@ class AuthService {
     const passwordHash = await bcrypt.hash(newPassword, env.BCRYPT_SALT_ROUNDS);
     await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
     await prisma.session.deleteMany({ where: { userId: user.id } });
+    // ✅ Log reset password
+    await auditLog(user.id, 'PASSWORD_RESET', 'User', user.id);
     return true;
   }
 }
