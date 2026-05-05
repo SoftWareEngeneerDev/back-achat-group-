@@ -7,13 +7,11 @@ const prisma = require('../../config/database');
 const { getPagination } = require('../../utils/helpers');
 const notificationService = require('../notifications/notification.service');
 
-// ── Champs autorisés à la modification ───────────────────────
 const ALLOWED_UPDATE_FIELDS = [
   'name', 'description', 'soloPrice', 'baseGroupPrice',
   'stock', 'imagesUrls', 'categoryId',
 ];
 
-// ── Sélection catalogue public ────────────────────────────────
 const PRODUCT_LIST_SELECT = {
   id: true, name: true, soloPrice: true, baseGroupPrice: true,
   stock: true, imagesUrls: true,
@@ -22,10 +20,8 @@ const PRODUCT_LIST_SELECT = {
   _count   : { select: { reviews: true, groups: true } },
 };
 
-// ── Statuts de groupes actifs ─────────────────────────────────
 const ACTIVE_GROUP_STATUSES = ['OPEN', 'THRESHOLD_REACHED'];
 
-// ── Helper fournisseur ────────────────────────────────────────
 const getSupplier = async (userId, mustBeApproved = false) => {
   const where = { userId };
   if (mustBeApproved) where.status = 'APPROVED';
@@ -37,7 +33,7 @@ const getSupplier = async (userId, mustBeApproved = false) => {
         ? 'Votre compte fournisseur n\'est pas encore validé'
         : 'Profil fournisseur introuvable'
     );
-    err.status = mustBeApproved ? 403 : 403;
+    err.status = 403;
     err.code   = mustBeApproved ? 'SUPPLIER_NOT_APPROVED' : 'SUPPLIER_NOT_FOUND';
     throw err;
   }
@@ -54,9 +50,9 @@ class ProductsService {
     const { page, limit, skip } = getPagination(query);
 
     const where = { status: 'APPROVED' };
-    if (query.category) where.categoryId = query.category;
-    if (query.supplierId) where.supplierId = query.supplierId;
-    if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
+    if (query.category)   where.categoryId = query.category;
+    if (query.supplierId) where.supplierId  = query.supplierId;
+    if (query.search)     where.name = { contains: query.search, mode: 'insensitive' };
     if (query.inStock === 'true') where.stock = { gt: 0 };
 
     if (query.minPrice || query.maxPrice) {
@@ -116,9 +112,117 @@ class ProductsService {
   async listCategories() {
     return prisma.category.findMany({
       where  : { parentId: null },
-      include: { children: { orderBy: { name: 'asc' } } },
+      include: {
+        children: {
+          orderBy: { name: 'asc' },
+          include: { _count: { select: { products: true } } },
+        },
+        _count: { select: { products: true } },
+      },
       orderBy: { name: 'asc' },
     });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // GESTION CATÉGORIES — ADMIN
+  // ──────────────────────────────────────────────────────────
+
+  async createCategory(data) {
+    const { name, parentId } = data;
+
+    // Générer le slug depuis le nom
+    const slug = name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    // Vérifier doublon
+    const existing = await prisma.category.findFirst({
+      where: { OR: [{ name }, { slug }] }
+    });
+    if (existing) {
+      const err = new Error('Une catégorie avec ce nom existe déjà');
+      err.status = 409; throw err;
+    }
+
+    // Vérifier que le parent existe si fourni
+    if (parentId) {
+      const parent = await prisma.category.findUnique({ where: { id: parentId } });
+      if (!parent) {
+        const err = new Error('Catégorie parente introuvable');
+        err.status = 404; throw err;
+      }
+    }
+
+    return prisma.category.create({
+      data: { name, slug, parentId: parentId ?? null },
+      include: {
+        parent  : { select: { id: true, name: true } },
+        children: true,
+        _count  : { select: { products: true } },
+      },
+    });
+  }
+
+  async updateCategory(categoryId, data) {
+    const category = await prisma.category.findUnique({ where: { id: categoryId } });
+    if (!category) {
+      const err = new Error('Catégorie introuvable');
+      err.status = 404; throw err;
+    }
+
+    const updateData = {};
+    if (data.name) {
+      updateData.name = data.name;
+      updateData.slug = data.name
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+    }
+    if (data.parentId !== undefined) updateData.parentId = data.parentId ?? null;
+
+    return prisma.category.update({
+      where  : { id: categoryId },
+      data   : updateData,
+      include: {
+        parent  : { select: { id: true, name: true } },
+        children: true,
+        _count  : { select: { products: true } },
+      },
+    });
+  }
+
+  async deleteCategory(categoryId) {
+    const category = await prisma.category.findUnique({
+      where  : { id: categoryId },
+      include: {
+        _count   : { select: { products: true, children: true } },
+      },
+    });
+
+    if (!category) {
+      const err = new Error('Catégorie introuvable');
+      err.status = 404; throw err;
+    }
+
+    // Vérifier qu'il n'y a pas de produits liés
+    if (category._count.products > 0) {
+      const err = new Error(`Impossible de supprimer : ${category._count.products} produit(s) utilisent cette catégorie`);
+      err.status = 409; throw err;
+    }
+
+    // Vérifier qu'il n'y a pas de sous-catégories
+    if (category._count.children > 0) {
+      const err = new Error(`Impossible de supprimer : cette catégorie a des sous-catégories`);
+      err.status = 409; throw err;
+    }
+
+    await prisma.category.delete({ where: { id: categoryId } });
+    return { message: 'Catégorie supprimée avec succès' };
   }
 
   // ──────────────────────────────────────────────────────────
@@ -150,7 +254,7 @@ class ProductsService {
   }
 
   async createProduct(userId, data) {
-    const supplier = await getSupplier(userId, true); // doit être APPROVED
+    const supplier = await getSupplier(userId, true);
 
     if (parseFloat(data.baseGroupPrice) >= parseFloat(data.soloPrice)) {
       const err = new Error('Le prix groupé doit être inférieur au prix solo');
@@ -201,7 +305,6 @@ class ProductsService {
       Object.entries(data).filter(([k]) => ALLOWED_UPDATE_FIELDS.includes(k))
     );
 
-    // Repasser en PENDING_APPROVAL après modification si approuvé
     if (product.status === 'APPROVED') updateData.status = 'PENDING_APPROVAL';
 
     return prisma.product.update({ where: { id: productId }, data: updateData });
@@ -248,7 +351,6 @@ class ProductsService {
       data : { stock: parseInt(newStock) },
     });
 
-    // Rupture de stock → annuler les groupes ouverts
     if (parseInt(newStock) === 0) {
       const affectedGroups = await prisma.group.findMany({
         where : { productId, status: { in: ACTIVE_GROUP_STATUSES } },
