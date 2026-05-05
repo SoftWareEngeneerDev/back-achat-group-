@@ -26,6 +26,7 @@ const notificationsRoutes = require('./modules/notifications/notification.routes
 const reviewsRoutes       = require('./modules/reviews/reviews.routes');
 const disputesRoutes      = require('./modules/disputes/disputes.routes');
 const adminRoutes         = require('./modules/admin/admin.routes');
+const uploadRoutes        = require('./modules/upload/upload.routes');
 const swaggerSpec         = require('./config/swagger');
 
 const app        = express();
@@ -40,7 +41,7 @@ app.use(helmet({
       defaultSrc : ["'self'"],
       scriptSrc  : ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
       styleSrc   : ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc     : ["'self'", "data:", "https://validator.swagger.io", `http://localhost:${env.PORT}`],
+      imgSrc     : ["'self'", "data:", "https://validator.swagger.io", `http://localhost:${env.PORT}`, "https://res.cloudinary.com"],
     },
   },
   crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -105,10 +106,11 @@ const V1 = '/api/v1';
 
 app.use(`${V1}/auth`,          authRoutes);
 app.use(`${V1}/users`,         usersRoutes);
-app.use(V1,                    productsRoutes);   // ← monté sur /api/v1 pour /products, /categories, /admin/categories
-app.use(V1,                    groupsRoutes);    // ← /supplier/groups, /admin/groups
+app.use(V1,                    productsRoutes);   // ← /products, /categories, /admin/categories
+app.use(V1,                    groupsRoutes);     // ← /groups, /supplier/groups, /admin/groups
 app.use(`${V1}/payments`,      paymentsRoutes);
-app.use(V1,                    ordersRoutes);    // ← /supplier/orders
+app.use(V1,                    ordersRoutes);     // ← /supplier/orders
+app.use(V1,                    uploadRoutes);     // ← /supplier/upload/images
 app.use(`${V1}/notifications`, notificationsRoutes);
 app.use(`${V1}/reviews`,       reviewsRoutes);
 app.use(`${V1}/disputes`,      disputesRoutes);
