@@ -23,7 +23,7 @@ const approvedValidator = [
 ];
 
 // ── FOURNISSEURS ─────────────────────────────────────────────
-router.get  ('/suppliers',               controller.getSuppliers.bind(controller));
+router.get  ('/suppliers',controller.getSuppliers.bind(controller));
 router.patch('/suppliers/:id/validate',
   [idParam, ...approvedValidator], validate,
   controller.validateSupplier.bind(controller)
