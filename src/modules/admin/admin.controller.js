@@ -49,6 +49,21 @@ class AdminController {
 
   // ── Produits ───────────────────────────────────────────────
 
+
+  async getProductById(req, res, next) {
+    try {
+      const product = await adminService.getProductById(req.params.id);
+      return success(res, product);
+    } catch (err) { next(err); }
+  }
+
+  async getGroupById(req, res, next) {
+    try {
+      const group = await adminService.getGroupById(req.params.id);
+      return success(res, group);
+    } catch (err) { next(err); }
+  }
+
   async getAllProducts(req, res, next) {
     try {
       const { data, total, page, limit } = await adminService.getAllProducts(req.query);

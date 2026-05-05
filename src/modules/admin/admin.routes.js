@@ -270,6 +270,9 @@ router.patch('/suppliers/:id/validate', [idParam, ...approvedValidator], validat
 router.get('/products', controller.getAllProducts.bind(controller));
 
 router.get('/products/pending', controller.getPendingProducts.bind(controller));
+router.get('/products/:id', [idParam], validate, controller.getProductById.bind(controller));
+
+
 
 /**
  * @swagger
@@ -345,6 +348,8 @@ router.get('/groups', controller.getGroups.bind(controller));
  *       200: { description: Groupe fermé — membres notifiés }
  *       409: { description: Groupe déjà terminé }
  */
+router.get('/groups/:id', [idParam], validate, controller.getGroupById.bind(controller));
+
 router.patch('/groups/:id/close', [idParam, body('reason').optional().isString().trim()], validate, controller.closeGroup.bind(controller));
 
 /**
