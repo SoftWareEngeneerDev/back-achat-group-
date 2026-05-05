@@ -247,6 +247,28 @@ router.patch('/suppliers/:id/validate', [idParam, ...approvedValidator], validat
  *     responses:
  *       200: { description: Liste des produits en attente }
  */
+/**
+ * @swagger
+ * /admin/products:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Tous les produits (tous statuts)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/pageParam'
+ *       - $ref: '#/components/parameters/limitParam'
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [PENDING_APPROVAL, APPROVED, REJECTED, ARCHIVED, ALL] }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Liste paginée de tous les produits }
+ */
+router.get('/products', controller.getAllProducts.bind(controller));
+
 router.get('/products/pending', controller.getPendingProducts.bind(controller));
 
 /**

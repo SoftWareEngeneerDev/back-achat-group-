@@ -48,6 +48,14 @@ class AdminController {
   }
 
   // ── Produits ───────────────────────────────────────────────
+
+  async getAllProducts(req, res, next) {
+    try {
+      const { data, total, page, limit } = await adminService.getAllProducts(req.query);
+      return paginated(res, data, page, limit, total);
+    } catch (err) { next(err); }
+  }
+
   async getPendingProducts(req, res, next) {
     try {
       const { data, total, page, limit } = await adminService.getPendingProducts(req.query);

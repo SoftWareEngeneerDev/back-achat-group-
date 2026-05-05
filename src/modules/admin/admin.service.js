@@ -167,6 +167,39 @@ class AdminService {
 
   // ── PRODUITS ─────────────────────────────────────────────────
 
+
+  async getAllProducts(query) {
+    const { page, limit, skip } = getPagination(query);
+    const { status, search } = query;
+
+    const where = {};
+    if (status && status !== 'ALL') where.status = status;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { supplier: { companyName: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      prisma.product.findMany({
+        where, skip, take: limit,
+        include: {
+          category: true,
+          supplier: {
+            include: {
+              user: { select: { name: true, phone: true, email: true, city: true } }
+            }
+          },
+          _count: { select: { groups: true, reviews: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.product.count({ where }),
+    ]);
+    return { data, total, page, limit };
+  }
+
   async getPendingProducts(query) {
     const { page, limit, skip } = getPagination(query);
     const [data, total] = await Promise.all([
