@@ -111,9 +111,9 @@ const V1 = '/api/v1';
 app.use(`${V1}/auth`,          authRoutes);
 app.use(`${V1}/users`,         usersRoutes);
 app.use(V1,                    productsRoutes);   // ← monté sur /api/v1 pour /products, /categories, /admin/categories
-app.use(`${V1}/groups`,        groupsRoutes);
+app.use(V1,                    groupsRoutes);    // ← /supplier/groups, /admin/groups
 app.use(`${V1}/payments`,      paymentsRoutes);
-app.use(`${V1}/orders`,        ordersRoutes);
+app.use(V1,                    ordersRoutes);    // ← /supplier/orders
 app.use(`${V1}/notifications`, notificationsRoutes);
 app.use(`${V1}/reviews`,       reviewsRoutes);
 app.use(`${V1}/disputes`,      disputesRoutes);
