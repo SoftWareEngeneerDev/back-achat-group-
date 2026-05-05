@@ -23,8 +23,8 @@ const notificationService = require('../notifications/notification.service');
 // ── Sélections réutilisables ─────────────────────────────────
 const GROUP_INCLUDE = {
   product     : { select: { id: true, name: true, imagesUrls: true, soloPrice: true } },
-  supplier    : { select: { id: true, companyName: true, rating: true, city: true,
-                    user: { select: { name: true, phone: true } } } },
+  supplier    : { select: { id: true, companyName: true,
+                    user: { select: { name: true, phone: true, city: true } } } },
   pricingTiers: { orderBy: { participantCount: 'asc' } },
   _count      : { select: { members: { where: { status: 'ACTIVE' } } } },
 };
@@ -40,10 +40,8 @@ const GROUP_DETAIL_INCLUDE = {
     select: {
       id         : true,
       companyName: true,
-      rating     : true,
-      city       : true,
       description: true,
-      user       : { select: { name: true, phone: true } },
+      user       : { select: { name: true, phone: true, city: true } },
     },
   },
   pricingTiers: { orderBy: { participantCount: 'asc' } },
