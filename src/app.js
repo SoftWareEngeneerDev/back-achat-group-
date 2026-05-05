@@ -43,7 +43,7 @@ app.use(helmet({
       imgSrc     : ["'self'", "data:", "https://validator.swagger.io", `http://localhost:${env.PORT}`],
     },
   },
-  crossOriginResourcePolicy: { policy: 'cross-origin' }, // permet les images depuis le front
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
 app.use(cors({
@@ -58,15 +58,15 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan(env.IS_DEV ? 'dev' : 'combined', {
   stream: { write: (msg) => logger.info(msg.trim()) },
-  skip  : (req) => req.url === '/health', // ne pas logger les health checks
+  skip  : (req) => req.url === '/health',
 }));
 app.use(globalLimiter);
 
 // ============================================================
-// FICHIERS STATIQUES — Avatars et uploads
+// FICHIERS STATIQUES
 // ============================================================
 app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
-  maxAge : '7d', // cache navigateur 7 jours
+  maxAge : '7d',
   etag   : true,
 }));
 
@@ -105,7 +105,7 @@ const V1 = '/api/v1';
 
 app.use(`${V1}/auth`,          authRoutes);
 app.use(`${V1}/users`,         usersRoutes);
-app.use(`${V1}/products`,      productsRoutes);
+app.use(V1,                    productsRoutes);   // ← monté sur /api/v1 pour /products, /categories, /admin/categories
 app.use(`${V1}/groups`,        groupsRoutes);
 app.use(`${V1}/payments`,      paymentsRoutes);
 app.use(`${V1}/orders`,        ordersRoutes);
