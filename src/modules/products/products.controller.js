@@ -1,16 +1,13 @@
 // ============================================================
 // PRODUCTS CONTROLLER — Traitement des requêtes HTTP
 // Djula Market — Burkina Faso
-// L'ownership est vérifié dans le service.
 // ============================================================
-
 const productsService = require('./products.service');
 const { success, created, paginated } = require('../../utils/response');
 
 class ProductsController {
 
   // ── Publiques ─────────────────────────────────────────────
-
   async listProducts(req, res, next) {
     try {
       const { data, total, page, limit } = await productsService.listProducts(req.query);
@@ -32,8 +29,29 @@ class ProductsController {
     } catch (err) { next(err); }
   }
 
-  // ── Fournisseur ───────────────────────────────────────────
+  // ── Catégories Admin ──────────────────────────────────────
+  async createCategory(req, res, next) {
+    try {
+      const category = await productsService.createCategory(req.body);
+      return created(res, category, 'Catégorie créée avec succès');
+    } catch (err) { next(err); }
+  }
 
+  async updateCategory(req, res, next) {
+    try {
+      const category = await productsService.updateCategory(req.params.id, req.body);
+      return success(res, category, 'Catégorie mise à jour');
+    } catch (err) { next(err); }
+  }
+
+  async deleteCategory(req, res, next) {
+    try {
+      const result = await productsService.deleteCategory(req.params.id);
+      return success(res, result);
+    } catch (err) { next(err); }
+  }
+
+  // ── Fournisseur ───────────────────────────────────────────
   async getMyProducts(req, res, next) {
     try {
       const { data, total, page, limit } = await productsService.getMyProducts(req.user.id, req.query);

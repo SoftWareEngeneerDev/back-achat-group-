@@ -372,11 +372,12 @@ class AdminService {
     const today = new Date(); today.setHours(0, 0, 0, 0);
 
     const [
-      totalMembers, activeGroups, successGroups, totalGroups,
+      totalMembers, totalUsers, activeGroups, successGroups, totalGroups,
       pendingProducts, pendingSuppliers, openDisputes, newMembersToday,
       revenueResult, commissionResult, escrowResult,
     ] = await Promise.all([
       prisma.user.count({ where: { role: 'MEMBER', status: 'ACTIVE' } }),
+      prisma.user.count(),
       prisma.group.count({ where: { status: { in: ['OPEN', 'THRESHOLD_REACHED'] } } }),
       prisma.group.count({ where: { status: 'CLOSED' } }),
       prisma.group.count(),
@@ -393,6 +394,7 @@ class AdminService {
       ? parseFloat(((successGroups / totalGroups) * 100).toFixed(1)) : 0;
 
     return {
+      totalUsers,
       totalMembers,
       activeGroups,
       totalGroups,

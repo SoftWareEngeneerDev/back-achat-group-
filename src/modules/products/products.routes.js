@@ -6,10 +6,12 @@ const router = require('express').Router();
 const { body, param } = require('express-validator');
 const controller    = require('./products.controller');
 const { validate, sanitizeBody }  = require('../../middleware/validate');
-const { authenticate, requireSupplier } = require('../../middleware/auth');
+const { authenticate, requireAdmin, requireSupplier } = require('../../middleware/auth');
 const { createLimiter } = require('../../middleware/rateLimit');
 
-const productIdParam = param('id').notEmpty().withMessage('ID produit requis');
+const productIdParam  = param('id').notEmpty().withMessage('ID produit requis');
+const categoryIdParam = param('id').notEmpty().withMessage('ID catégorie requis');
+
 const createValidators = [
   body('name').notEmpty().trim().withMessage('Nom du produit requis'),
   body('description').notEmpty().trim().withMessage('Description requise'),
@@ -19,6 +21,7 @@ const createValidators = [
   body('categoryId').notEmpty().withMessage('Catégorie requise'),
   body('imagesUrls').optional().isArray(),
 ];
+
 const updateValidators = [
   body('soloPrice').optional().isFloat({ min: 1 }),
   body('baseGroupPrice').optional().isFloat({ min: 1 }),
@@ -26,12 +29,14 @@ const updateValidators = [
   body('imagesUrls').optional().isArray(),
 ];
 
-/**
- * @swagger
- * tags:
- *   name: Products
- *   description: 📦 Produits — Catalogue, catégories, avis
- */
+const categoryValidators = [
+  body('name').notEmpty().trim().withMessage('Nom de la catégorie requis'),
+  body('parentId').optional().isUUID().withMessage('parentId invalide'),
+];
+
+// ============================================================
+// ROUTES PUBLIQUES
+// ============================================================
 
 /**
  * @swagger
@@ -46,11 +51,9 @@ const updateValidators = [
  *       - in: query
  *         name: category
  *         schema: { type: string }
- *         description: ID catégorie
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Recherche par nom
  *       - in: query
  *         name: minPrice
  *         schema: { type: number }
@@ -66,16 +69,6 @@ const updateValidators = [
  *     responses:
  *       200:
  *         description: Liste paginée des produits
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success: { type: boolean }
- *                 data:
- *                   type: array
- *                   items: { $ref: '#/components/schemas/Product' }
- *                 meta: { $ref: '#/components/schemas/Pagination' }
  */
 router.get('/products', controller.listProducts.bind(controller));
 
@@ -92,15 +85,7 @@ router.get('/products', controller.listProducts.bind(controller));
  *         required: true
  *         schema: { type: string, format: uuid }
  *     responses:
- *       200:
- *         description: Détail complet du produit
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success: { type: boolean }
- *                 data:    { $ref: '#/components/schemas/Product' }
+ *       200: { description: Détail complet du produit }
  *       404: { $ref: '#/components/responses/NotFound' }
  */
 router.get('/products/:id', [productIdParam], validate, controller.getProduct.bind(controller));
@@ -110,11 +95,39 @@ router.get('/products/:id', [productIdParam], validate, controller.getProduct.bi
  * /categories:
  *   get:
  *     tags: [Products]
- *     summary: Liste toutes les catégories
+ *     summary: Liste toutes les catégories avec sous-catégories
  *     security: []
  *     responses:
  *       200:
  *         description: Arbre des catégories
+ */
+router.get('/categories', controller.listCategories.bind(controller));
+
+// ============================================================
+// GESTION CATÉGORIES — ADMIN
+// ============================================================
+
+/**
+ * @swagger
+ * /admin/categories:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Créer une nouvelle catégorie
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name]
+ *             properties:
+ *               name    : { type: string, example: "Électronique" }
+ *               parentId: { type: string, format: uuid, description: "ID catégorie parente (optionnel)" }
+ *     responses:
+ *       201:
+ *         description: Catégorie créée
  *         content:
  *           application/json:
  *             schema:
@@ -122,23 +135,80 @@ router.get('/products/:id', [productIdParam], validate, controller.getProduct.bi
  *               properties:
  *                 success: { type: boolean }
  *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id          : { type: string }
- *                       name        : { type: string, example: "Électronique" }
- *                       slug        : { type: string, example: "electronique" }
- *                       productCount: { type: integer }
+ *                   type: object
+ *                   properties:
+ *                     id      : { type: string }
+ *                     name    : { type: string }
+ *                     slug    : { type: string }
+ *                     parentId: { type: string, nullable: true }
+ *       409: { description: Catégorie avec ce nom existe déjà }
  */
-router.get('/categories', controller.listCategories.bind(controller));
+router.post('/admin/categories',
+  authenticate, requireAdmin,
+  categoryValidators, validate,
+  controller.createCategory.bind(controller)
+);
+
+/**
+ * @swagger
+ * /admin/categories/{id}:
+ *   put:
+ *     tags: [Admin]
+ *     summary: Modifier une catégorie
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name    : { type: string }
+ *               parentId: { type: string, nullable: true }
+ *     responses:
+ *       200: { description: Catégorie mise à jour }
+ *       404: { $ref: '#/components/responses/NotFound' }
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Supprimer une catégorie (impossible si des produits l'utilisent)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Catégorie supprimée }
+ *       409: { description: Des produits ou sous-catégories utilisent cette catégorie }
+ */
+router.put('/admin/categories/:id',
+  authenticate, requireAdmin,
+  [categoryIdParam, body('name').optional().trim(), body('parentId').optional()], validate,
+  controller.updateCategory.bind(controller)
+);
+
+router.delete('/admin/categories/:id',
+  authenticate, requireAdmin,
+  [categoryIdParam], validate,
+  controller.deleteCategory.bind(controller)
+);
+
+// ============================================================
+// ROUTES FOURNISSEUR
+// ============================================================
 
 /**
  * @swagger
  * /supplier/products:
  *   get:
  *     tags: [Supplier]
- *     summary: Mes produits (fournisseur)
+ *     summary: Mes produits
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -149,8 +219,6 @@ router.get('/categories', controller.listCategories.bind(controller));
  *         schema: { type: string, enum: [DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, ARCHIVED] }
  *     responses:
  *       200: { description: Liste de mes produits }
- *       401: { $ref: '#/components/responses/Unauthorized' }
- *       403: { $ref: '#/components/responses/Forbidden' }
  *   post:
  *     tags: [Supplier]
  *     summary: Soumettre un nouveau produit pour validation
@@ -164,7 +232,7 @@ router.get('/categories', controller.listCategories.bind(controller));
  *             type: object
  *             required: [name, description, soloPrice, baseGroupPrice, stock, categoryId]
  *             properties:
- *               name          : { type: string, example: "Samsung Galaxy A55" }
+ *               name          : { type: string }
  *               description   : { type: string }
  *               soloPrice     : { type: number, example: 285000 }
  *               baseGroupPrice: { type: number, example: 185250 }
@@ -173,7 +241,6 @@ router.get('/categories', controller.listCategories.bind(controller));
  *               imagesUrls    : { type: array, items: { type: string } }
  *     responses:
  *       201: { description: Produit soumis — en attente de validation }
- *       429: { $ref: '#/components/responses/TooManyRequests' }
  */
 router.get ('/supplier/products', authenticate, requireSupplier, controller.getMyProducts.bind(controller));
 router.post('/supplier/products', authenticate, requireSupplier, createLimiter, sanitizeBody, createValidators, validate, controller.createProduct.bind(controller));
@@ -191,19 +258,8 @@ router.post('/supplier/products', authenticate, requireSupplier, createLimiter, 
  *         name: id
  *         required: true
  *         schema: { type: string }
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               soloPrice     : { type: number }
- *               baseGroupPrice: { type: number }
- *               stock         : { type: integer }
- *               imagesUrls    : { type: array, items: { type: string } }
  *     responses:
  *       200: { description: Produit mis à jour }
- *       404: { $ref: '#/components/responses/NotFound' }
  *   delete:
  *     tags: [Supplier]
  *     summary: Archiver un produit
@@ -241,7 +297,7 @@ router.delete('/supplier/products/:id', authenticate, requireSupplier, [productI
  *             type: object
  *             required: [stock]
  *             properties:
- *               stock: { type: integer, minimum: 0, example: 150 }
+ *               stock: { type: integer, minimum: 0 }
  *     responses:
  *       200: { description: Stock mis à jour }
  */
