@@ -247,7 +247,32 @@ router.patch('/suppliers/:id/validate', [idParam, ...approvedValidator], validat
  *     responses:
  *       200: { description: Liste des produits en attente }
  */
+/**
+ * @swagger
+ * /admin/products:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Tous les produits (tous statuts)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/pageParam'
+ *       - $ref: '#/components/parameters/limitParam'
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [PENDING_APPROVAL, APPROVED, REJECTED, ARCHIVED, ALL] }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Liste paginée de tous les produits }
+ */
+router.get('/products', controller.getAllProducts.bind(controller));
+
 router.get('/products/pending', controller.getPendingProducts.bind(controller));
+router.get('/products/:id', [idParam], validate, controller.getProductById.bind(controller));
+
+
 
 /**
  * @swagger
@@ -323,6 +348,8 @@ router.get('/groups', controller.getGroups.bind(controller));
  *       200: { description: Groupe fermé — membres notifiés }
  *       409: { description: Groupe déjà terminé }
  */
+router.get('/groups/:id', [idParam], validate, controller.getGroupById.bind(controller));
+
 router.patch('/groups/:id/close', [idParam, body('reason').optional().isString().trim()], validate, controller.closeGroup.bind(controller));
 
 /**

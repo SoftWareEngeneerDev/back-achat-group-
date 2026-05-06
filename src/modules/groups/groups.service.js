@@ -52,6 +52,12 @@ const GROUP_DETAIL_INCLUDE = {
 };
 
 // ── Émettre un événement WebSocket (non bloquant) ────────────
+// ── Helper auditLog ───────────────────────────────────────────
+const auditLog = (userId, action, entity, entityId, metadata = {}) =>
+  prisma.auditLog.create({
+    data: { userId, action, entity, entityId, metadata },
+  }).catch(() => {});
+
 const emitSocket = (room, event, data) => {
   try {
     const io = require('../../sockets/socket').getIO();
@@ -254,6 +260,12 @@ class GroupsService {
         },
         include: { pricingTiers: true },
       });
+
+      // ✅ Log création groupe
+      await auditLog(userId ?? 'system', 'GROUP_CREATED', 'Group', group.id, {
+        productId : data.productId,
+        minMembers: data.minParticipants,
+      }).catch(() => {});
 
       return group;
     });
@@ -460,6 +472,13 @@ class GroupsService {
         status: updatedGroup.status,
       });
 
+      // ✅ Log membre rejoint
+      await auditLog(userId, 'GROUP_JOINED', 'Group', groupId, {
+        depositAmount,
+        newCount,
+        thresholdReached: thresholdJustReached,
+      }).catch(() => {});
+
       return { member, group: updatedGroup };
     });
   }
@@ -500,6 +519,11 @@ class GroupsService {
         where: { userId, groupId, type: 'DEPOSIT', status: 'ESCROWED' },
         data : { status: 'REFUNDED' },
       });
+
+      // ✅ Log membre quitte
+      await auditLog(userId, 'GROUP_LEFT', 'Group', groupId, {
+        refundAmount: member.depositPaid,
+      }).catch(() => {});
 
       return { refundAmount: member.depositPaid };
     });

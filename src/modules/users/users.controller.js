@@ -3,7 +3,9 @@
 // Djula Market — Burkina Faso
 // ============================================================
 
-const usersService = require('./users.service');
+const usersService  = require('./users.service');
+const uploadService = require('../upload/upload.service');
+const prisma        = require('../../config/database');
 const { success, created, paginated, badRequest } = require('../../utils/response');
 
 class UsersController {
@@ -24,12 +26,22 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
-  /** POST /users/me/avatar */
+  /** POST /users/me/avatar — upload vers Cloudinary */
   async uploadAvatar(req, res, next) {
     try {
       if (!req.file) return badRequest(res, 'Aucun fichier reçu');
-      const result = await usersService.uploadAvatar(req.user.id, req.file);
-      return created(res, result, 'Photo de profil mise à jour');
+
+      // ✅ Upload vers Cloudinary au lieu du disque local
+      const urls      = await uploadService.uploadMultipleImages([req.file], 'avatars');
+      const avatarUrl = urls[0];
+
+      // Sauvegarder l'URL Cloudinary en base
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data : { avatarUrl },
+      });
+
+      return success(res, { avatarUrl }, 'Photo de profil mise à jour');
     } catch (err) { next(err); }
   }
 

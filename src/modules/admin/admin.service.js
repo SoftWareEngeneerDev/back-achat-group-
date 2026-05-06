@@ -167,6 +167,79 @@ class AdminService {
 
   // ── PRODUITS ─────────────────────────────────────────────────
 
+
+
+  async getProductById(productId) {
+    const product = await prisma.product.findUnique({
+      where  : { id: productId },
+      include: {
+        category: true,
+        supplier: {
+          include: {
+            user: { select: { name: true, phone: true, email: true, city: true } }
+          }
+        },
+        _count: { select: { groups: true, reviews: true } },
+      },
+    });
+    if (!product) {
+      const err = new Error('Produit introuvable');
+      err.status = 404; throw err;
+    }
+    return product;
+  }
+
+  async getGroupById(groupId) {
+    const group = await prisma.group.findUnique({
+      where  : { id: groupId },
+      include: {
+        product: {
+          include: { category: true }
+        },
+        supplier    : { include: { user: { select: { name: true, phone: true, city: true } } } },
+        pricingTiers: { orderBy: { participantCount: 'asc' } },
+        _count      : { select: { members: true } },
+      },
+    });
+    if (!group) {
+      const err = new Error('Groupe introuvable');
+      err.status = 404; throw err;
+    }
+    return group;
+  }
+
+  async getAllProducts(query) {
+    const { page, limit, skip } = getPagination(query);
+    const { status, search } = query;
+
+    const where = {};
+    if (status && status !== 'ALL') where.status = status;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { supplier: { companyName: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      prisma.product.findMany({
+        where, skip, take: limit,
+        include: {
+          category: true,
+          supplier: {
+            include: {
+              user: { select: { name: true, phone: true, email: true, city: true } }
+            }
+          },
+          _count: { select: { groups: true, reviews: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.product.count({ where }),
+    ]);
+    return { data, total, page, limit };
+  }
+
   async getPendingProducts(query) {
     const { page, limit, skip } = getPagination(query);
     const [data, total] = await Promise.all([
