@@ -263,7 +263,16 @@ class AuthService {
     return {
       accessToken,
       refreshToken,
-      user: { id: user.id, name: user.name, role: user.role, status: user.status },
+      user: {
+        id       : user.id,
+        name     : user.name,
+        role     : user.role,
+        status   : user.status,
+        avatarUrl: user.avatarUrl ?? null,  // ✅ inclure la photo
+        city     : user.city     ?? null,
+        email    : user.email    ?? null,
+        phone    : user.phone    ?? null,
+      },
     };
   }
 
@@ -283,7 +292,7 @@ class AuthService {
 
     const user = await prisma.user.findUnique({
       where:  { id: decoded.sub },
-      select: { id: true, name: true, role: true, status: true },
+      select: { id: true, name: true, role: true, status: true, avatarUrl: true, city: true, email: true, phone: true },
     });
 
     if (!user || user.status === 'BANNED' || user.status === 'SUSPENDED') {
