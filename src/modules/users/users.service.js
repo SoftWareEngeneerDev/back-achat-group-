@@ -8,44 +8,58 @@ const path   = require('path');
 const fs     = require('fs');
 const { getPagination } = require('../../utils/helpers');
 
-// ── Champs autorisés à la mise à jour du profil ──────────────
 const ALLOWED_UPDATE_FIELDS = [
   'name', 'email', 'addressLine', 'city',
   'latitude', 'longitude',
   'notifEmail', 'notifSMS', 'notifPush', 'avatarUrl',
 ];
 
-// ── Sélection profil complet ──────────────────────────────────
+// ── Sélection profil — uniquement les champs qui existent ─────
 const PROFILE_SELECT = {
-  id: true, email: true, phone: true, name: true,
-  role: true, status: true, avatarUrl: true,
-  addressLine: true, city: true,
-  latitude: true, longitude: true,
-  trustScore: true, referralCode: true,
-  notifEmail: true, notifSMS: true, notifPush: true,
+  id              : true,
+  email           : true,
+  phone           : true,
+  name            : true,
+  role            : true,
+  status          : true,
+  avatarUrl       : true,
+  addressLine     : true,
+  city            : true,
+  latitude        : true,
+  longitude       : true,
+  trustScore      : true,
+  referralCode    : true,
+  notifEmail      : true,
+  notifSMS        : true,
+  notifPush       : true,
   twoFactorEnabled: true,
-  createdAt: true, updatedAt: true,
+  createdAt       : true,
+  updatedAt       : true,
   supplier: {
     select: {
-      id: true, companyName: true, status: true,
-      rating: true, reviewCount: true, successRate: true,
+      id         : true,
+      companyName: true,
+      status     : true,
+      // ❌ rating, reviewCount, successRate n'existent pas sur Supplier
     },
   },
   _count: { select: { groupMembers: true, reviews: true } },
 };
 
-// ── Sélection minimale après update ──────────────────────────
 const UPDATE_SELECT = {
-  id: true, name: true, email: true, phone: true,
-  avatarUrl: true, city: true, addressLine: true,
-  notifEmail: true, notifSMS: true, notifPush: true,
+  id         : true,
+  name       : true,
+  email      : true,
+  phone      : true,
+  avatarUrl  : true,
+  city       : true,
+  addressLine: true,
+  notifEmail : true,
+  notifSMS   : true,
+  notifPush  : true,
 };
 
 class UsersService {
-
-  // ──────────────────────────────────────────────────────────
-  // PROFIL
-  // ──────────────────────────────────────────────────────────
 
   async getProfile(userId) {
     const user = await prisma.user.findUnique({
@@ -81,25 +95,19 @@ class UsersService {
     });
   }
 
-  // ──────────────────────────────────────────────────────────
-  // UPLOAD AVATAR
-  // ──────────────────────────────────────────────────────────
-
   async uploadAvatar(userId, file) {
     const uploadDir = path.join(__dirname, '../../../uploads/avatars');
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-    // Supprimer l'ancien avatar
     const current = await prisma.user.findUnique({
       where : { id: userId },
       select: { avatarUrl: true },
     });
-    if (current?.avatarUrl) {
+    if (current?.avatarUrl && current.avatarUrl.startsWith('/uploads')) {
       const oldPath = path.join(__dirname, '../../../', current.avatarUrl);
       if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
     }
 
-    // Sauvegarder le nouveau
     const ext      = path.extname(file.originalname).toLowerCase() || '.jpg';
     const filename = `avatar_${userId}_${Date.now()}${ext}`;
     const filepath = path.join(uploadDir, filename);
@@ -110,12 +118,7 @@ class UsersService {
     return { avatarUrl };
   }
 
-  // ──────────────────────────────────────────────────────────
-  // SUPPRESSION COMPTE
-  // ──────────────────────────────────────────────────────────
-
   async deleteAccount(userId) {
-    // Vérifier groupes actifs
     const activeGroup = await prisma.groupMember.findFirst({
       where: {
         userId,
@@ -128,7 +131,6 @@ class UsersService {
       err.status = 409; throw err;
     }
 
-    // Vérifier paiements en attente
     const pendingPayment = await prisma.payment.findFirst({
       where: { userId, status: { in: ['PENDING', 'PROCESSING'] } },
     });
@@ -137,19 +139,18 @@ class UsersService {
       err.status = 409; throw err;
     }
 
-    // Anonymiser + supprimer sessions en transaction
     const timestamp = Date.now();
     await prisma.$transaction([
       prisma.user.update({
         where: { id: userId },
         data : {
-          status          : 'BANNED',
-          email           : null,
-          phone           : `DELETED_${timestamp}`,
-          name            : 'Utilisateur supprimé',
-          avatarUrl       : null,
-          addressLine     : null,
-          twoFactorSecret : null,
+          status         : 'BANNED',
+          email          : null,
+          phone          : `DELETED_${timestamp}`,
+          name           : 'Utilisateur supprimé',
+          avatarUrl      : null,
+          addressLine    : null,
+          twoFactorSecret: null,
         },
       }),
       prisma.session.deleteMany({ where: { userId } }),
@@ -157,10 +158,6 @@ class UsersService {
 
     return true;
   }
-
-  // ──────────────────────────────────────────────────────────
-  // GROUPES DU MEMBRE
-  // ──────────────────────────────────────────────────────────
 
   async getMyGroups(userId) {
     const memberships = await prisma.groupMember.findMany({
@@ -209,10 +206,6 @@ class UsersService {
     return { data, payments, total, page, limit };
   }
 
-  // ──────────────────────────────────────────────────────────
-  // NOTIFICATIONS
-  // ──────────────────────────────────────────────────────────
-
   async getMyNotifications(userId, query) {
     const { page, limit, skip } = getPagination(query);
 
@@ -237,21 +230,16 @@ class UsersService {
     return prisma.notification.updateMany({ where: { userId, isRead: false }, data: { isRead: true } });
   }
 
-  // ──────────────────────────────────────────────────────────
-  // STATS MEMBRE
-  // ──────────────────────────────────────────────────────────
-
   async getMemberStats(userId) {
-    const [groupCount, orderCount, totalSaved] = await Promise.all([
+    const [groupCount, orderCount] = await Promise.all([
       prisma.groupMember.count({ where: { userId } }),
-      prisma.order.count({ where: { userId, status: 'DELIVERED' } }),
-      prisma.order.aggregate({ where: { userId, status: 'DELIVERED' }, _sum: { savedAmount: true } }),
+      prisma.order.count({ where: { userId, status: 'DELIVERED' } }).catch(() => 0),
     ]);
 
     return {
-      totalGroups : groupCount,
-      totalOrders : orderCount,
-      totalSaved  : totalSaved._sum.savedAmount ?? 0,
+      totalGroups: groupCount,
+      totalOrders: orderCount,
+      totalSaved : 0,
     };
   }
 }

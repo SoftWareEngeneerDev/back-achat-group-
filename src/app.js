@@ -105,7 +105,7 @@ if (env.IS_DEV) {
 const V1 = '/api/v1';
 
 app.use(`${V1}/auth`,          authRoutes);
-app.use(`${V1}/users`,         usersRoutes);
+app.use(V1,                    usersRoutes);     // ← /users/me, /users/me/groups etc.
 app.use(V1,                    productsRoutes);   // ← /products, /categories, /admin/categories
 app.use(V1,                    groupsRoutes);     // ← /groups, /supplier/groups, /admin/groups
 app.use(`${V1}/payments`,      paymentsRoutes);
