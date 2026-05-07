@@ -116,7 +116,7 @@ app.use(V1,                    groupsRoutes);     // ← /groups, /supplier/grou
 app.use(`${V1}/payments`,      paymentsRoutes);
 app.use(V1,                    ordersRoutes);     // ← /supplier/orders
 app.use(V1,                    uploadRoutes);     // ← /supplier/upload/images
-app.use(`${V1}/notifications`, notificationsRoutes);
+app.use(V1,                    notificationsRoutes); // ← /notifications, /notifications/read-all
 app.use(`${V1}/reviews`,       reviewsRoutes);
 app.use(`${V1}/disputes`,      disputesRoutes);
 app.use(`${V1}/admin`,         adminRoutes);

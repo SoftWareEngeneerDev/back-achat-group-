@@ -4,6 +4,9 @@
 // ============================================================
 
 const rateLimit = require('express-rate-limit');
+const env       = require('../config/env');
+
+const IS_DEV = env.IS_DEV || env.NODE_ENV === 'development';
 
 // ── Extracteurs de clé ────────────────────────────────────────
 const keyByIP   = (req) => req.ip;
@@ -19,7 +22,7 @@ const limitMsg = (message) => ({
 const makeLimiter = (windowMs, max, keyGenerator, message, skip = undefined) =>
   rateLimit({
     windowMs,
-    max,
+    max            : IS_DEV ? max * 20 : max,  // ✅ x20 en dev
     keyGenerator,
     standardHeaders: true,
     legacyHeaders  : false,
@@ -39,13 +42,13 @@ const globalLimiter = makeLimiter(
   'Trop de requêtes. Réessayez dans 15 minutes.'
 );
 
-/** Auth — 5 tentatives / min par IP (anti brute-force) */
+/** Auth — 5 tentatives / min par IP */
 const authLimiter = makeLimiter(
   60 * 1000, 5, keyByIP,
   'Trop de tentatives de connexion. Réessayez dans 1 minute.'
 );
 
-/** OTP — 3 demandes / min par IP (anti spam SMS) */
+/** OTP — 3 demandes / min par IP */
 const otpLimiter = makeLimiter(
   60 * 1000, 3, keyByIP,
   'Trop de demandes OTP. Réessayez dans 1 minute.'
@@ -65,7 +68,7 @@ const joinGroupLimiter = makeLimiter(
   skipIfNotConnected
 );
 
-/** Création (produits, groupes, avis, litiges) — 20 / heure par userId */
+/** Création — 20 / heure par userId */
 const createLimiter = makeLimiter(
   60 * 60 * 1000, 20, keyByUser,
   'Trop de créations en peu de temps. Réessayez dans 1 heure.',
