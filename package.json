@@ -2,9 +2,12 @@
   "name": "achats-groupes-backend",
   "version": "1.0.0",
   "description": "Backend plateforme e-commerce achats groupés - Burkina Faso",
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
   "main": "src/app.js",
   "scripts": {
-    "start": "node src/app.js",
+    "start": "npx prisma migrate deploy && node src/app.js",
     "dev": "nodemon src/app.js",
     "test": "jest --runInBand",
     "prisma:migrate": "prisma migrate dev",
