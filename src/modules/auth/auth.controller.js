@@ -4,8 +4,28 @@
 
 const authService = require('./auth.service');
 const prisma      = require('../../config/database');
+const env         = require('../../config/env');
 const { formatPhone } = require('../../utils/helpers');
 const { success, created, error } = require('../../utils/response');
+
+// ── Options communes pour les cookies httpOnly ───────────────
+// SameSite=None + Secure requis pour cross-origin (localhost → Railway)
+const COOKIE_BASE = {
+  httpOnly: true,
+  secure  : env.IS_PROD,           // true en prod (HTTPS), false en dev
+  sameSite: env.IS_PROD ? 'none' : 'lax',  // 'none' pour cross-origin prod
+  path    : '/',
+};
+
+const setAuthCookies = (res, tokens) => {
+  res.cookie('access_token',  tokens.accessToken,  { ...COOKIE_BASE, maxAge: 15 * 60 * 1000 });
+  res.cookie('refresh_token', tokens.refreshToken, { ...COOKIE_BASE, maxAge: 7 * 24 * 60 * 60 * 1000 });
+};
+
+const clearAuthCookies = (res) => {
+  res.clearCookie('access_token',  { path: '/', sameSite: env.IS_PROD ? 'none' : 'lax', secure: env.IS_PROD });
+  res.clearCookie('refresh_token', { path: '/', sameSite: env.IS_PROD ? 'none' : 'lax', secure: env.IS_PROD });
+};
 
 class AuthController {
 
@@ -31,6 +51,7 @@ class AuthController {
           }, 'OTP vérifié');
         }
         const tokens = await authService.generateTokens(user);
+        setAuthCookies(res, tokens);
         return success(res, tokens, 'OTP vérifié avec succès');
       }
 
@@ -38,26 +59,19 @@ class AuthController {
     } catch (err) { next(err); }
   }
 
-  /** POST /auth/supplier-profile
-   *  CORRECTION : plus de JWT — on identifie le fournisseur par son téléphone
-   */
+  /** POST /auth/supplier-profile */
   async updateSupplierProfile(req, res, next) {
     try {
       const { phone, ...profileData } = req.body;
 
-      // Trouver l'utilisateur via son téléphone
       const user = await prisma.user.findUnique({
-        where: { phone: formatPhone(phone) },
+        where : { phone: formatPhone(phone) },
         select: { id: true, role: true, status: true },
       });
 
-      if (!user) {
-        return error(res, 'Utilisateur introuvable', 404, 'USER_NOT_FOUND');
-      }
-
-      if (user.role !== 'SUPPLIER') {
-        return error(res, 'Ce compte n\'est pas un compte fournisseur', 403, 'NOT_SUPPLIER');
-      }
+      if (!user) return error(res, 'Utilisateur introuvable', 404, 'USER_NOT_FOUND');
+      if (user.role !== 'SUPPLIER') return error(res, 'Ce compte n\'est pas un compte fournisseur', 403, 'NOT_SUPPLIER');
+      if (user.status !== 'SUSPENDED') return error(res, 'Profil déjà configuré ou compte non éligible', 403, 'INVALID_STATUS');
 
       const result = await authService.updateSupplierProfile(user.id, profileData);
       return success(res, result, 'Profil fournisseur mis à jour');
@@ -70,12 +84,11 @@ class AuthController {
       const { phone, type = 'REGISTER' } = req.body;
 
       const user = await prisma.user.findUnique({
-        where:  { phone: formatPhone(phone) },
+        where : { phone: formatPhone(phone) },
         select: { id: true, phone: true, status: true },
       });
 
       if (!user) return error(res, 'Aucun compte associé à ce numéro', 404, 'USER_NOT_FOUND');
-
       if (type === 'REGISTER' && user.status !== 'PENDING_VERIFICATION') {
         return error(res, 'Ce compte est déjà vérifié', 400, 'ALREADY_VERIFIED');
       }
@@ -92,6 +105,7 @@ class AuthController {
       if (result.twoFactorRequired) {
         return success(res, { twoFactorRequired: true }, 'Code 2FA envoyé par SMS');
       }
+      setAuthCookies(res, result);
       return success(res, result, 'Connexion réussie');
     } catch (err) { next(err); }
   }
@@ -99,7 +113,10 @@ class AuthController {
   /** POST /auth/refresh */
   async refresh(req, res, next) {
     try {
-      const tokens = await authService.refresh(req.body.refreshToken);
+      const refreshToken = req.cookies?.refresh_token || req.body.refreshToken;
+      if (!refreshToken) return error(res, 'Refresh token requis', 422, 'VALIDATION_ERROR');
+      const tokens = await authService.refresh(refreshToken);
+      setAuthCookies(res, tokens);
       return success(res, tokens, 'Token rafraîchi avec succès');
     } catch (err) { next(err); }
   }
@@ -107,8 +124,9 @@ class AuthController {
   /** POST /auth/logout */
   async logout(req, res, next) {
     try {
-      const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
+      const refreshToken = req.cookies?.refresh_token || req.body.refreshToken;
       await authService.logout(refreshToken);
+      clearAuthCookies(res);
       return success(res, null, 'Déconnexion réussie');
     } catch (err) { next(err); }
   }

@@ -93,8 +93,12 @@ class OrdersService {
       data : { status: 'DELIVERED', deliveredAt: new Date() },
     });
 
-    // TODO: déclencher la libération du paiement escrow → fournisseur
-    // await paymentsService.releaseEscrow(order.groupId, order.userId);
+    // Déclencher la libération du paiement escrow vers le fournisseur
+    const paymentsService = require('../payments/payments.service');
+    paymentsService.releaseEscrow(order.groupId).catch((err) => {
+      const logger = require('../../utils/logger');
+      logger.error('[ESCROW] Échec libération escrow:', err.message);
+    });
 
     return updated;
   }

@@ -20,8 +20,9 @@ const USER_SELECT = {
   twoFactorEnabled: true,
 };
 
-// ── Extraire le token Bearer du header ───────────────────────
+// ── Extraire le token : cookie httpOnly en priorité, sinon Bearer header ─
 const extractToken = (req) => {
+  if (req.cookies?.access_token) return req.cookies.access_token;
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) return null;
   return auth.split(' ')[1];

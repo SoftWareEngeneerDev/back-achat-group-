@@ -4,13 +4,38 @@
 // Base URL : /api/v1
 // ============================================================
 
-const router = require('express').Router();
-const { body } = require('express-validator');
+const crypto     = require('crypto');
+const router     = require('express').Router();
+const { body }   = require('express-validator');
 const controller = require('./payments.controller');
-const { validate } = require('../../middleware/validate');
-const { authenticate, requireAdmin } = require('../../middleware/auth');
-const { paymentLimiter } = require('../../middleware/rateLimit'); // ← AJOUT
-const env = require('../../config/env');
+const { validate }                    = require('../../middleware/validate');
+const { authenticate, requireAdmin }  = require('../../middleware/auth');
+const { paymentLimiter }              = require('../../middleware/rateLimit');
+const env    = require('../../config/env');
+const logger = require('../../utils/logger');
+
+// ── Vérification du secret webhook CinetPay ─────────────────
+// Le secret doit être ajouté à l'URL : ?token=CINETPAY_WEBHOOK_SECRET
+const verifyWebhookSecret = (req, res, next) => {
+  const secret = env.CINETPAY_WEBHOOK_SECRET;
+  if (!secret) return next(); // pas de secret configuré → skip (dev)
+
+  const token = req.query.token || req.headers['x-cinetpay-token'];
+  if (!token) {
+    logger.warn('[WEBHOOK] Token absent');
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  // Comparaison en temps constant pour prévenir les timing attacks
+  const secretBuf = Buffer.from(secret);
+  const tokenBuf  = Buffer.from(token);
+  if (secretBuf.length !== tokenBuf.length || !crypto.timingSafeEqual(secretBuf, tokenBuf)) {
+    logger.warn('[WEBHOOK] Token invalide');
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  next();
+};
 
 /**
  * @swagger
@@ -171,6 +196,7 @@ router.get('/payments/:id/status', authenticate, controller.getPaymentStatus.bin
  */
 router.post(
   '/payments/webhooks/cinetpay',
+  verifyWebhookSecret,
   controller.cinetpayWebhook.bind(controller),
 );
 

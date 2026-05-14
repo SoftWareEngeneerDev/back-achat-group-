@@ -138,6 +138,7 @@ router.post('/verify-otp',
  *         description: Profil fournisseur créé — en attente de validation admin
  */
 router.post('/supplier-profile',
+  otpLimiter,  // ← rate limit : prévenir l'énumération de numéros
   [
     body('phone').notEmpty().withMessage('Numéro de téléphone requis'),
     body('companyName').trim().notEmpty().withMessage('Nom de l\'entreprise requis'),
@@ -259,7 +260,7 @@ router.post('/login',
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.post('/refresh',
-  [body('refreshToken').notEmpty().withMessage('Refresh token requis')],
+  [body('refreshToken').optional()], // peut venir du cookie httpOnly
   validate,
   controller.refresh.bind(controller),
 );

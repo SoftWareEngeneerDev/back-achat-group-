@@ -160,9 +160,15 @@ class PaymentsService {
    * CORRECTION : confirmJoinAfterDeposit reçoit depositAmount (nombre).
    */
   async handleCinetPayWebhook(data) {
-    const { cpm_trans_id, cpm_result, cpm_amount } = data;
+    const { cpm_trans_id, cpm_result, cpm_amount, cpm_site_id } = data;
 
     logger.info(`[WEBHOOK] CinetPay reçu - ref: ${cpm_trans_id}, result: ${cpm_result}`);
+
+    // ── Vérifier que le site_id correspond au nôtre ────────
+    if (env.CINETPAY_SITE_ID && cpm_site_id && String(cpm_site_id) !== String(env.CINETPAY_SITE_ID)) {
+      logger.warn(`[WEBHOOK] Site ID invalide: ${cpm_site_id}`);
+      return;
+    }
 
     // ── Trouver le paiement en base ────────────────────────
     const payment = await prisma.payment.findUnique({
@@ -182,26 +188,25 @@ class PaymentsService {
 
     if (cpm_result === '00') {
       // ── PAIEMENT RÉUSSI ────────────────────────────────────
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: payment.type === 'DEPOSIT' ? 'ESCROWED' : 'COMPLETED',
-          processedAt: new Date(),
-          gatewayResponse: data,
-        },
-      });
 
       if (payment.type === 'DEPOSIT') {
-        // ── CORRECTION : groupId vient du Payment directement ─
-        // CORRECTION : on passe depositAmount (nombre), pas payment.id
+        // Ordre sécurisé : confirmer l'adhésion D'ABORD, puis marquer comme payé.
+        // Si confirmJoinAfterDeposit échoue, le paiement reste PENDING → webhook retryable.
         await groupsService.confirmJoinAfterDeposit(
           payment.groupId,
           payment.userId,
-          payment.amount,   // ← depositAmount en FCFA
+          payment.amount,
         );
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data : { status: 'ESCROWED', processedAt: new Date(), gatewayResponse: data },
+        });
 
       } else if (payment.type === 'FINAL_PAYMENT') {
-        // ── Vérifier si tous les membres ont payé ─────────────
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data : { status: 'COMPLETED', processedAt: new Date(), gatewayResponse: data },
+        });
         await this._checkAndCloseGroup(payment.groupId, payment.userId);
       }
 
@@ -212,7 +217,6 @@ class PaymentsService {
         data: { status: 'FAILED', gatewayResponse: data },
       });
 
-      // Notifier l'utilisateur
       await notificationService.notify(payment.userId, {
         type: 'SYSTEM',
         title: '❌ Paiement échoué',
@@ -297,6 +301,68 @@ class PaymentsService {
 
       logger.info(`[PAYMENT] Groupe ${groupId} clôturé. Commande créée. Total: ${totalAmount} FCFA`);
     }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // LIBÉRATION ESCROW → FOURNISSEUR
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Libère le paiement escrow vers le fournisseur après confirmation de livraison.
+   * Crée un enregistrement SUPPLIER_PAYOUT et notifie le fournisseur.
+   */
+  async releaseEscrow(groupId) {
+    const order = await prisma.order.findFirst({
+      where  : { groupId, status: 'DELIVERED' },
+      include: { group: { include: { supplier: { include: { user: { select: { id: true, name: true } } } } } } },
+    });
+
+    if (!order) {
+      logger.warn(`[ESCROW] Commande DELIVERED introuvable pour groupId: ${groupId}`);
+      return;
+    }
+
+    // Vérifier qu'un paiement fournisseur n'a pas déjà été créé
+    const existing = await prisma.payment.findFirst({
+      where: { groupId, type: 'SUPPLIER_PAYOUT', status: { in: ['PENDING', 'COMPLETED'] } },
+    });
+    if (existing) {
+      logger.warn(`[ESCROW] Paiement fournisseur déjà créé pour groupe: ${groupId}`);
+      return;
+    }
+
+    const supplierId = order.group?.supplier?.userId ?? order.group?.supplierId;
+    if (!supplierId) {
+      logger.error(`[ESCROW] Fournisseur introuvable pour groupe: ${groupId}`);
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.create({
+        data: {
+          userId      : supplierId,
+          groupId,
+          amount      : order.supplierAmount,
+          currency    : 'XOF',
+          type        : 'SUPPLIER_PAYOUT',
+          status      : 'PENDING',
+          method      : 'BANK_TRANSFER',
+          transactionRef: `PAYOUT_${groupId}_${Date.now()}`,
+        },
+      });
+    });
+
+    const supplierUserId = order.group?.supplier?.user?.id;
+    if (supplierUserId) {
+      await notificationService.notify(supplierUserId, {
+        type    : 'SYSTEM',
+        title   : '💰 Paiement en cours de virement',
+        body    : `La livraison a été confirmée. Votre virement de ${order.supplierAmount.toLocaleString()} FCFA est en cours de traitement.`,
+        channels: ['sms', 'email'],
+      }).catch(() => {});
+    }
+
+    logger.info(`[ESCROW] Libération escrow créée pour groupe ${groupId} — montant: ${order.supplierAmount} FCFA`);
   }
 
   // ──────────────────────────────────────────────────────────
