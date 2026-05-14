@@ -47,16 +47,31 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
+// ── CORS — liste blanche des origines autorisées ──────────────
+const ALLOWED_ORIGINS = [
+  'http://localhost:4300',
+  'http://localhost:4200',
+  'http://localhost:3000',
+  env.FRONTEND_URL,
+].filter(Boolean);
+
 app.use(cors({
-  origin        : env.FRONTEND_URL || '*',
+  origin: (origin, callback) => {
+    // Autoriser les requêtes sans origin (Postman, apps mobiles)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error('CORS non autorisé pour : ' + origin));
+  },
   credentials   : true,
-  methods       : ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods        : ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders : ['Content-Type', 'Authorization'],
 }));
 
+app.options('*', cors());
+
 app.use(compression());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(morgan(env.IS_DEV ? 'dev' : 'combined', {
   stream: { write: (msg) => logger.info(msg.trim()) },
   skip  : (req) => req.url === '/health',
@@ -105,13 +120,13 @@ if (env.IS_DEV) {
 const V1 = '/api/v1';
 
 app.use(`${V1}/auth`,          authRoutes);
-app.use(V1,                    usersRoutes);     // ← /users/me, /users/me/groups etc.
-app.use(V1,                    productsRoutes);   // ← /products, /categories, /admin/categories
-app.use(V1,                    groupsRoutes);     // ← /groups, /supplier/groups, /admin/groups
+app.use(V1,                    usersRoutes);
+app.use(V1,                    productsRoutes);
+app.use(V1,                    groupsRoutes);
 app.use(`${V1}/payments`,      paymentsRoutes);
-app.use(V1,                    ordersRoutes);     // ← /supplier/orders
-app.use(V1,                    uploadRoutes);     // ← /supplier/upload/images
-app.use(V1,                    notificationsRoutes); // ← /notifications, /notifications/read-all
+app.use(V1,                    ordersRoutes);
+app.use(V1,                    uploadRoutes);
+app.use(V1,                    notificationsRoutes);
 app.use(`${V1}/reviews`,       reviewsRoutes);
 app.use(`${V1}/disputes`,      disputesRoutes);
 app.use(`${V1}/admin`,         adminRoutes);
@@ -148,7 +163,6 @@ const startServer = async () => {
   }
 };
 
-// ── Arrêt propre ─────────────────────────────────────────────
 const gracefulShutdown = async (signal) => {
   logger.info(`${signal} reçu — arrêt propre...`);
   try {
@@ -161,16 +175,8 @@ const gracefulShutdown = async (signal) => {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
-
-process.on('unhandledRejection', (reason) => {
-  logger.error('⚠️  Unhandled Rejection:', reason);
-});
-
-process.on('uncaughtException', (err) => {
-  logger.error('💥 Uncaught Exception:', err);
-  process.exit(1);
-});
+process.on('unhandledRejection', (reason) => logger.error('⚠️  Unhandled Rejection:', reason));
+process.on('uncaughtException', (err) => { logger.error('💥 Uncaught Exception:', err); process.exit(1); });
 
 startServer();
-
 module.exports = app;
