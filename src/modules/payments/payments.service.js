@@ -246,7 +246,7 @@ class PaymentsService {
     const [paidCount, activeCount, group] = await Promise.all([
       prisma.groupMember.count({ where: { groupId, status: 'PAID' } }),
       prisma.groupMember.count({ where: { groupId, status: { in: ['ACTIVE', 'PAID'] } } }),
-      prisma.group.findUnique({ where: { id: groupId } }),
+      prisma.group.findUnique({ where: { id: groupId }, include: { supplier: { select: { userId: true } } } }),
     ]);
 
     logger.info(`[PAYMENT] Groupe ${groupId} : ${paidCount}/${activeCount} membres ont payé`);
@@ -279,7 +279,7 @@ class PaymentsService {
         // ── Enregistrer la commission plateforme ───────────
         await tx.payment.create({
           data: {
-            userId: group.supplierId || userId, // Lié au fournisseur
+            userId: group.supplier?.userId || userId,
             groupId,
             amount: commission,
             currency: 'XOF',

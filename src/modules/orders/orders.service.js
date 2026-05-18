@@ -38,7 +38,7 @@ class OrdersService {
    */
   async getMyOrders(userId) {
     return prisma.order.findMany({
-      where  : { userId },
+      where  : { group: { members: { some: { userId } } } },
       include: ORDER_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
@@ -49,7 +49,7 @@ class OrdersService {
    */
   async getOrderById(orderId, userId) {
     const order = await prisma.order.findFirst({
-      where  : { id: orderId, userId },
+      where  : { id: orderId, group: { members: { some: { userId } } } },
       include: {
         ...ORDER_INCLUDE,
         group: {
@@ -75,7 +75,7 @@ class OrdersService {
    */
   async confirmDelivery(orderId, userId) {
     const order = await prisma.order.findFirst({
-      where: { id: orderId, userId },
+      where: { id: orderId, group: { members: { some: { userId } } } },
     });
 
     if (!order) {
@@ -220,7 +220,7 @@ class OrdersService {
     const where = {};
     if (query.status)     where.status = query.status;
     if (query.supplierId) where.group  = { supplierId: query.supplierId };
-    if (query.userId)     where.userId = query.userId;
+    if (query.userId)     where.group  = { ...(where.group ?? {}), members: { some: { userId: query.userId } } };
 
     const [data, total] = await Promise.all([
       prisma.order.findMany({

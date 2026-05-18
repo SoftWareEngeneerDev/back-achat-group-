@@ -82,7 +82,7 @@ class ProductsService {
       where  : { id, status: 'APPROVED' },
       include: {
         category: true,
-        supplier: { select: { id: true, companyName: true, rating: true } },
+        supplier: { select: { id: true, companyName: true } },
         reviews : {
           where  : { isModerated: false },
           take   : 5,

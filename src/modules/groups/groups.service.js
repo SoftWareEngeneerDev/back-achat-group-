@@ -33,14 +33,13 @@ const GROUP_DETAIL_INCLUDE = {
   product: {
     include: {
       category: true,
-      supplier: { select: { companyName: true, rating: true } },
+      supplier: { select: { companyName: true } },
     },
   },
   supplier: {
     select: {
       id         : true,
       companyName: true,
-      description: true,
       user       : { select: { name: true, phone: true, city: true } },
     },
   },

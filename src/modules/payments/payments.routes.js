@@ -18,7 +18,13 @@ const logger = require('../../utils/logger');
 // Le secret doit être ajouté à l'URL : ?token=CINETPAY_WEBHOOK_SECRET
 const verifyWebhookSecret = (req, res, next) => {
   const secret = env.CINETPAY_WEBHOOK_SECRET;
-  if (!secret) return next(); // pas de secret configuré → skip (dev)
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('[WEBHOOK] CINETPAY_WEBHOOK_SECRET manquant en production');
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+    return next(); // dev uniquement
+  }
 
   const token = req.query.token || req.headers['x-cinetpay-token'];
   if (!token) {

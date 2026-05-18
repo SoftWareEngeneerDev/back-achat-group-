@@ -82,6 +82,7 @@ enum PaymentType {
   FINAL_PAYMENT
   REFUND
   COMMISSION
+  SUPPLIER_PAYOUT
 }
 
 enum OrderStatus {
