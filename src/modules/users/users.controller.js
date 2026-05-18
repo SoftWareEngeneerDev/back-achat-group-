@@ -100,6 +100,53 @@ class UsersController {
       return success(res, null, 'Toutes les notifications marquées comme lues');
     } catch (err) { next(err); }
   }
+
+  /** POST /supplier/withdrawal */
+  async createWithdrawalRequest(req, res, next) {
+    try {
+      const supplier = await prisma.supplier.findUnique({
+        where: { userId: req.user.id },
+        select: { id: true },
+      });
+      if (!supplier) {
+        const err = new Error('Profil fournisseur introuvable');
+        err.status = 404; throw err;
+      }
+
+      const { amount, method, accountInfo } = req.body;
+      const withdrawal = await prisma.withdrawalRequest.create({
+        data: {
+          supplierId : supplier.id,
+          amount     : parseFloat(amount),
+          method,
+          accountInfo: accountInfo.trim(),
+          status     : 'PENDING',
+        },
+      });
+
+      return created(res, withdrawal, 'Demande de retrait soumise avec succès');
+    } catch (err) { next(err); }
+  }
+
+  /** GET /supplier/withdrawals */
+  async getMyWithdrawalRequests(req, res, next) {
+    try {
+      const supplier = await prisma.supplier.findUnique({
+        where: { userId: req.user.id },
+        select: { id: true },
+      });
+      if (!supplier) {
+        return success(res, []);
+      }
+
+      const requests = await prisma.withdrawalRequest.findMany({
+        where  : { supplierId: supplier.id },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return success(res, requests);
+    } catch (err) { next(err); }
+  }
 }
 
 module.exports = new UsersController();

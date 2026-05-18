@@ -252,4 +252,59 @@ router.patch('/users/me/notifications/:id/read',
   controller.markNotificationRead.bind(controller)
 );
 
+// ============================================================
+// RETRAIT FOURNISSEUR
+// ============================================================
+const { requireSupplier } = require('../../middleware/auth');
+
+/**
+ * @swagger
+ * /supplier/withdrawal:
+ *   post:
+ *     tags: [Users]
+ *     summary: Créer une demande de retrait (Fournisseur)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [amount, method, accountInfo]
+ *             properties:
+ *               amount:      { type: number, example: 50000 }
+ *               method:      { type: string, enum: [ORANGE_MONEY, MOOV_MONEY, LIGDICASH] }
+ *               accountInfo: { type: string, example: "+22670123456" }
+ *     responses:
+ *       201: { description: Demande de retrait créée }
+ *       400: { description: Paramètres invalides }
+ */
+router.post('/supplier/withdrawal',
+  authenticate, requireSupplier,
+  [
+    body('amount').isFloat({ min: 1000 }).withMessage('Montant minimum : 1 000 XOF'),
+    body('method').isIn(['ORANGE_MONEY', 'MOOV_MONEY', 'LIGDICASH']).withMessage('Méthode invalide'),
+    body('accountInfo').notEmpty().trim().withMessage('Numéro de compte requis'),
+  ],
+  validate,
+  controller.createWithdrawalRequest.bind(controller)
+);
+
+/**
+ * @swagger
+ * /supplier/withdrawals:
+ *   get:
+ *     tags: [Users]
+ *     summary: Lister mes demandes de retrait (Fournisseur)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: { description: Liste des demandes de retrait }
+ */
+router.get('/supplier/withdrawals',
+  authenticate, requireSupplier,
+  controller.getMyWithdrawalRequests.bind(controller)
+);
+
 module.exports = router;

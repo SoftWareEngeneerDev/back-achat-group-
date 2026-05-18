@@ -200,8 +200,9 @@ model Supplier {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  products Product[]
-  groups   Group[]
+  products           Product[]
+  groups             Group[]
+  withdrawalRequests WithdrawalRequest[]
 }
 
 // ── Category — Catégories hiérarchiques ─────────────────────
@@ -422,4 +423,20 @@ model AuditLog {
   @@index([entity, entityId])
   @@index([action])
   @@index([createdAt])
+}
+
+// ── WithdrawalRequest — Demandes de retrait fournisseur ──────
+model WithdrawalRequest {
+  id          String   @id @default(uuid())
+  supplierId  String
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+  amount      Float
+  status      String   @default("PENDING")
+  method      String
+  accountInfo String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([supplierId])
+  @@index([status])
 }
