@@ -127,7 +127,7 @@ app.use(`${V1}/payments`,      paymentsRoutes);
 app.use(V1,                    ordersRoutes);
 app.use(V1,                    uploadRoutes);
 app.use(V1,                    notificationsRoutes);
-app.use(`${V1}/reviews`,       reviewsRoutes);
+app.use(V1,                    reviewsRoutes);
 app.use(`${V1}/disputes`,      disputesRoutes);
 app.use(`${V1}/admin`,         adminRoutes);
 
