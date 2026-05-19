@@ -277,6 +277,16 @@ router.post('/supplier/groups', authenticate, requireSupplier, createLimiter, sa
  */
 router.put('/supplier/groups/:id', authenticate, requireSupplier, [groupIdParam, ...updateGroupValidators], validate, controller.updateGroup.bind(controller));
 
+router.patch('/supplier/groups/:id/close',
+  authenticate, requireSupplier,
+  [
+    groupIdParam,
+    body('reason').optional().trim().isLength({ max: 500 }),
+  ],
+  validate,
+  controller.closeGroup.bind(controller)
+);
+
 /**
  * @swagger
  * /admin/groups:

@@ -319,6 +319,48 @@ class GroupsService {
     return updated;
   }
 
+  /**
+   * Clôturer manuellement un groupe (fournisseur)
+   * Statuts autorisés : OPEN, THRESHOLD_REACHED → CANCELLED
+   */
+  async closeGroup(groupId, userId, reason) {
+    const group = await prisma.group.findUnique({
+      where  : { id: groupId },
+      include: { supplier: true },
+    });
+
+    if (!group) {
+      const err = new Error('Groupe introuvable');
+      err.status = 404; throw err;
+    }
+
+    if (!['OPEN', 'THRESHOLD_REACHED'].includes(group.status)) {
+      const err = new Error('Seuls les groupes OPEN ou THRESHOLD_REACHED peuvent être clôturés manuellement');
+      err.status = 409; throw err;
+    }
+
+    if (group.supplier?.userId !== userId) {
+      const err = new Error('Vous n\'êtes pas autorisé à clôturer ce groupe');
+      err.status = 403; throw err;
+    }
+
+    await prisma.group.update({
+      where: { id: groupId },
+      data : { status: 'CANCELLED' },
+    });
+
+    await notificationService.notifyGroupMembers(groupId, {
+      type    : 'GROUP_FAILED',
+      title   : '⚠️ Groupe annulé par le fournisseur',
+      body    : reason
+        ? `Le fournisseur a annulé ce groupe. Raison : ${reason}. Votre dépôt sera remboursé sous 72h.`
+        : 'Le fournisseur a annulé ce groupe. Votre dépôt sera remboursé sous 72h.',
+      channels: ['sms', 'email'],
+    });
+
+    return { groupId, status: 'CANCELLED' };
+  }
+
   // ──────────────────────────────────────────────────────────
   // PARTICIPATION MEMBRES
   // ──────────────────────────────────────────────────────────

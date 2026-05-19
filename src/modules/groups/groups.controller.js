@@ -82,6 +82,14 @@ class GroupsController {
     } catch (err) { next(err); }
   }
 
+  /** PATCH /supplier/groups/:id/close */
+  async closeGroup(req, res, next) {
+    try {
+      const result = await groupsService.closeGroup(req.params.id, req.user.id, req.body.reason);
+      return success(res, result, 'Groupe annulé — membres notifiés');
+    } catch (err) { next(err); }
+  }
+
   // ── Routes admin ──────────────────────────────────────────
 
   /** POST /admin/groups */

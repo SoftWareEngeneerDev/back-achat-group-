@@ -101,6 +101,50 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
+  /** GET /supplier/me */
+  async getSupplierProfile(req, res, next) {
+    try {
+      const supplier = await usersService.getSupplierProfile(req.user.id);
+      return success(res, supplier);
+    } catch (err) { next(err); }
+  }
+
+  /** PUT /supplier/me */
+  async updateSupplierProfile(req, res, next) {
+    try {
+      const supplier = await usersService.updateSupplierProfile(req.user.id, req.body);
+      return success(res, supplier, 'Profil mis à jour avec succès');
+    } catch (err) { next(err); }
+  }
+
+  /** POST /supplier/me/logo */
+  async uploadSupplierLogo(req, res, next) {
+    try {
+      if (!req.file) return badRequest(res, 'Aucun fichier reçu');
+      const result = await usersService.uploadSupplierLogo(req.user.id, req.file, uploadService);
+      return success(res, result, 'Logo mis à jour');
+    } catch (err) { next(err); }
+  }
+
+  /** POST /supplier/me/documents */
+  async uploadSupplierDocuments(req, res, next) {
+    try {
+      if (!req.files || req.files.length === 0) return badRequest(res, 'Aucun fichier reçu');
+      const result = await usersService.uploadSupplierDocuments(req.user.id, req.files, uploadService);
+      return success(res, result, `${result.urls.length} document(s) ajouté(s)`);
+    } catch (err) { next(err); }
+  }
+
+  /** DELETE /supplier/me/documents */
+  async deleteSupplierDocument(req, res, next) {
+    try {
+      const { url } = req.body;
+      if (!url) return badRequest(res, 'URL du document requis');
+      const result = await usersService.deleteSupplierDocument(req.user.id, url);
+      return success(res, result, 'Document supprimé');
+    } catch (err) { next(err); }
+  }
+
   /** POST /supplier/withdrawal */
   async createWithdrawalRequest(req, res, next) {
     try {

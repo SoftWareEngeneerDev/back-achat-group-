@@ -190,6 +190,10 @@ model Supplier {
   userId         String         @unique
   user           User           @relation(fields: [userId], references: [id])
   companyName    String
+  contactName    String?
+  address        String?
+  description    String?
+  logoUrl        String?
   siret          String?        @unique
   taxId          String?
   docsUrls       String[]

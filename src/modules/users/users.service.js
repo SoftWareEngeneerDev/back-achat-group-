@@ -242,6 +242,93 @@ class UsersService {
       totalSaved : 0,
     };
   }
+
+  // ── SUPPLIER PROFILE ──────────────────────────────────────
+
+  async getSupplierProfile(userId) {
+    const supplier = await prisma.supplier.findUnique({
+      where  : { userId },
+      include: {
+        user  : { select: { id: true, name: true, email: true, phone: true, city: true, avatarUrl: true } },
+        _count: { select: { products: true, groups: true } },
+      },
+    });
+    if (!supplier) {
+      const err = new Error('Profil fournisseur introuvable');
+      err.status = 404; throw err;
+    }
+    return supplier;
+  }
+
+  async updateSupplierProfile(userId, data) {
+    const supplier = await prisma.supplier.findUnique({ where: { userId } });
+    if (!supplier) {
+      const err = new Error('Profil fournisseur introuvable');
+      err.status = 404; throw err;
+    }
+
+    const supplierUpdate = {};
+    if (data.companyName !== undefined) supplierUpdate.companyName = data.companyName.trim();
+    if (data.contactName !== undefined) supplierUpdate.contactName = data.contactName.trim();
+    if (data.address     !== undefined) supplierUpdate.address     = data.address.trim();
+    if (data.description !== undefined) supplierUpdate.description = data.description.trim();
+
+    const userUpdate = {};
+    if (data.email !== undefined) userUpdate.email = data.email.trim() || undefined;
+    if (data.city  !== undefined) userUpdate.city  = data.city.trim();
+
+    await prisma.$transaction([
+      prisma.supplier.update({ where: { userId }, data: supplierUpdate }),
+      ...(Object.keys(userUpdate).length > 0
+        ? [prisma.user.update({ where: { id: userId }, data: userUpdate })]
+        : []),
+    ]);
+
+    return this.getSupplierProfile(userId);
+  }
+
+  async uploadSupplierLogo(userId, file, uploadService) {
+    const supplier = await prisma.supplier.findUnique({ where: { userId } });
+    if (!supplier) {
+      const err = new Error('Profil fournisseur introuvable');
+      err.status = 404; throw err;
+    }
+    const urls    = await uploadService.uploadMultipleImages([file], 'logos');
+    const logoUrl = urls[0];
+    await prisma.supplier.update({ where: { userId }, data: { logoUrl } });
+    return { logoUrl };
+  }
+
+  async uploadSupplierDocuments(userId, files, uploadService) {
+    const supplier = await prisma.supplier.findUnique({ where: { userId } });
+    if (!supplier) {
+      const err = new Error('Profil fournisseur introuvable');
+      err.status = 404; throw err;
+    }
+    const urls = await uploadService.uploadMultipleImages(files, 'documents');
+    const updated = await prisma.supplier.update({
+      where: { userId },
+      data : { docsUrls: { push: urls } },
+    });
+    return { urls, docsUrls: updated.docsUrls };
+  }
+
+  async deleteSupplierDocument(userId, url) {
+    const supplier = await prisma.supplier.findUnique({ where: { userId } });
+    if (!supplier) {
+      const err = new Error('Profil fournisseur introuvable');
+      err.status = 404; throw err;
+    }
+    if (!supplier.docsUrls.includes(url)) {
+      const err = new Error('Document introuvable');
+      err.status = 404; throw err;
+    }
+    const updated = await prisma.supplier.update({
+      where: { userId },
+      data : { docsUrls: supplier.docsUrls.filter(u => u !== url) },
+    });
+    return { docsUrls: updated.docsUrls };
+  }
 }
 
 module.exports = new UsersService();

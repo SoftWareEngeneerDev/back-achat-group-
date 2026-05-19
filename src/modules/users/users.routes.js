@@ -253,9 +253,62 @@ router.patch('/users/me/notifications/:id/read',
 );
 
 // ============================================================
-// RETRAIT FOURNISSEUR
+// PROFIL FOURNISSEUR — /supplier/me
 // ============================================================
 const { requireSupplier } = require('../../middleware/auth');
+
+const uploadDocs = multer({
+  storage   : multer.memoryStorage(),
+  limits    : { fileSize: 5 * 1024 * 1024, files: 5 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'];
+    const ext     = path.extname(file.originalname).toLowerCase();
+    allowed.includes(ext) ? cb(null, true) : cb(new Error('Format non supporté.'));
+  },
+});
+
+router.get('/supplier/me',
+  authenticate, requireSupplier,
+  controller.getSupplierProfile.bind(controller)
+);
+
+router.put('/supplier/me',
+  authenticate, requireSupplier,
+  sanitizeBody,
+  [
+    body('companyName').optional().trim().isLength({ min: 2, max: 200 }),
+    body('contactName').optional().trim().isLength({ max: 200 }),
+    body('address').optional().trim().isLength({ max: 500 }),
+    body('description').optional().trim().isLength({ max: 1000 }),
+    body('email').optional().isEmail().normalizeEmail(),
+    body('city').optional().trim().isLength({ max: 100 }),
+  ],
+  validate,
+  controller.updateSupplierProfile.bind(controller)
+);
+
+router.post('/supplier/me/logo',
+  authenticate, requireSupplier, uploadLimiter,
+  upload.single('logo'),
+  controller.uploadSupplierLogo.bind(controller)
+);
+
+router.post('/supplier/me/documents',
+  authenticate, requireSupplier, uploadLimiter,
+  uploadDocs.array('documents', 5),
+  controller.uploadSupplierDocuments.bind(controller)
+);
+
+router.delete('/supplier/me/documents',
+  authenticate, requireSupplier,
+  [body('url').notEmpty().withMessage('URL requise')],
+  validate,
+  controller.deleteSupplierDocument.bind(controller)
+);
+
+// ============================================================
+// RETRAIT FOURNISSEUR
+// ============================================================
 
 /**
  * @swagger
