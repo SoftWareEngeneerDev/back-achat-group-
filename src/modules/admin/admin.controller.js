@@ -145,6 +145,14 @@ class AdminController {
     } catch (err) { next(err); }
   }
 
+  // ── Paiements ──────────────────────────────────────────────
+  async getAllPayments(req, res, next) {
+    try {
+      const { data, total, page, limit } = await adminService.getAllPayments(req.query);
+      return paginated(res, data, page, limit, total);
+    } catch (err) { next(err); }
+  }
+
   // ── Remboursements ─────────────────────────────────────────
   async getPendingRefunds(req, res, next) {
     try {

@@ -441,6 +441,8 @@ router.patch('/disputes/:id/resolve',
  *     responses:
  *       200: { description: Remboursement effectué }
  */
+router.get('/payments', controller.getAllPayments.bind(controller));
+
 router.post('/payments/refund',
   [body('paymentId').notEmpty(), body('reason').notEmpty().trim()],
   validate, controller.refundPayment.bind(controller)

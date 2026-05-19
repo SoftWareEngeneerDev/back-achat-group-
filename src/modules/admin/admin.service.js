@@ -465,6 +465,29 @@ class AdminService {
     return updated;
   }
 
+  // ── PAIEMENTS ────────────────────────────────────────────────
+
+  async getAllPayments(query) {
+    const { page, limit, skip } = getPagination(query);
+    const { status, type } = query;
+    const where = {};
+    if (status && status !== 'ALL') where.status = status;
+    if (type   && type   !== 'ALL') where.type   = type;
+
+    const [data, total] = await Promise.all([
+      prisma.payment.findMany({
+        where, skip, take: limit,
+        include: {
+          user : { select: { name: true, phone: true } },
+          group: { include: { product: { select: { name: true } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.payment.count({ where }),
+    ]);
+    return { data, total, page, limit };
+  }
+
   // ── REMBOURSEMENTS ───────────────────────────────────────────
 
   async getPendingRefunds(query) {
