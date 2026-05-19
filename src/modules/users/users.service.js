@@ -232,7 +232,7 @@ class UsersService {
   }
 
   async getMemberStats(userId) {
-    const [groupCount, orderCount] = await Promise.all([
+    const [groupCount, orderCount, payments] = await Promise.all([
       prisma.groupMember.count({ where: { userId } }),
       prisma.order.count({
         where: {
@@ -240,30 +240,55 @@ class UsersService {
           group : { members: { some: { userId, status: { in: ['ACTIVE', 'PAID'] } } } },
         },
       }).catch(() => 0),
+      // Économies : soloPrice - montant payé (FINAL_PAYMENT uniquement)
+      // Note : basePrice n'existe pas dans le schéma — on utilise soloPrice
+      prisma.payment.findMany({
+        where : { userId, status: 'COMPLETED', type: 'FINAL_PAYMENT' },
+        select: { amount: true, group: { select: { product: { select: { soloPrice: true } } } } },
+      }).catch(() => []),
     ]);
+
+    const totalSaved = payments.reduce((sum, p) => {
+      const soloPrice = p.group?.product?.soloPrice;
+      if (!soloPrice) return sum;
+      return sum + Math.max(0, soloPrice - p.amount);
+    }, 0);
 
     return {
       totalGroups: groupCount,
       totalOrders: orderCount,
-      totalSaved : 0,
+      totalSaved,
     };
   }
 
   // ── SUPPLIER PROFILE ──────────────────────────────────────
 
   async getSupplierProfile(userId) {
-    const supplier = await prisma.supplier.findUnique({
-      where  : { userId },
-      include: {
-        user  : { select: { id: true, name: true, email: true, phone: true, city: true, avatarUrl: true } },
-        _count: { select: { products: true, groups: true } },
-      },
-    });
+    const [supplier, reviews] = await Promise.all([
+      prisma.supplier.findUnique({
+        where  : { userId },
+        include: {
+          user  : { select: { id: true, name: true, email: true, phone: true, city: true, avatarUrl: true } },
+          _count: { select: { products: true, groups: true } },
+        },
+      }),
+      prisma.review.findMany({
+        where : { product: { supplier: { userId } } },
+        select: { rating: true },
+      }),
+    ]);
+
     if (!supplier) {
       const err = new Error('Profil fournisseur introuvable');
       err.status = 404; throw err;
     }
-    return supplier;
+
+    const reviewCount = reviews.length;
+    const rating      = reviewCount > 0
+      ? Math.round((reviews.reduce((s, r) => s + r.rating, 0) / reviewCount) * 10) / 10
+      : 0;
+
+    return { ...supplier, rating, reviewCount };
   }
 
   async updateSupplierProfile(userId, data) {

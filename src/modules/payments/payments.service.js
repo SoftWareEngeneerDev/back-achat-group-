@@ -356,11 +356,25 @@ class PaymentsService {
     if (supplierUserId) {
       await notificationService.notify(supplierUserId, {
         type    : 'SYSTEM',
-        title   : '💰 Paiement en cours de virement',
-        body    : `La livraison a été confirmée. Votre virement de ${order.supplierAmount.toLocaleString()} FCFA est en cours de traitement.`,
+        title   : '💰 Virement en attente de traitement',
+        body    : `La livraison a été confirmée. Votre virement de ${order.supplierAmount.toLocaleString()} FCFA est en attente de traitement manuel. L'administration vous contactera sous 48h ouvrées.`,
         channels: ['sms', 'email'],
       }).catch(() => {});
     }
+
+    // Notifier les admins pour traitement manuel via la page Retraits
+    const admins = await prisma.user.findMany({
+      where : { role: 'ADMIN', status: 'ACTIVE' },
+      select: { id: true },
+    });
+    await Promise.allSettled(admins.map(admin =>
+      notificationService.notify(admin.id, {
+        type    : 'SYSTEM',
+        title   : '🏦 Virement fournisseur à traiter',
+        body    : `Un virement de ${order.supplierAmount.toLocaleString()} FCFA est en attente pour le groupe ${groupId.slice(0, 8)}. Traitez-le via la page Retraits.`,
+        channels: [],
+      })
+    ));
 
     logger.info(`[ESCROW] Libération escrow créée pour groupe ${groupId} — montant: ${order.supplierAmount} FCFA`);
   }
