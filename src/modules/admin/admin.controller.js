@@ -39,6 +39,28 @@ class AdminController {
     } catch (err) { next(err); }
   }
 
+  async getSupplierById(req, res, next) {
+    try {
+      const supplier = await adminService.getSupplierById(req.params.id);
+      return success(res, supplier);
+    } catch (err) { next(err); }
+  }
+
+  async getWithdrawals(req, res, next) {
+    try {
+      const { data, total, page, limit } = await adminService.getWithdrawals(req.query);
+      return paginated(res, data, page, limit, total);
+    } catch (err) { next(err); }
+  }
+
+  async processWithdrawal(req, res, next) {
+    try {
+      const { approved, reason } = req.body;
+      const result = await adminService.processWithdrawal(req.params.id, req.user.id, { approved, reason });
+      return success(res, result, `Retrait ${approved ? 'approuvé' : 'refusé'}`);
+    } catch (err) { next(err); }
+  }
+
   async validateSupplier(req, res, next) {
     try {
       const { approved, reason } = req.body;

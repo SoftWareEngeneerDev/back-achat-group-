@@ -37,6 +37,20 @@ class DisputesService {
   }
 
   /**
+   * Détail d'un litige — accessible uniquement par son créateur
+   */
+  async getDisputeById(disputeId, userId) {
+    const dispute = await prisma.dispute.findFirst({
+      where  : { id: disputeId, userId },
+      include: { user: { select: { name: true, phone: true } } },
+    });
+    if (!dispute) {
+      const err = new Error('Litige introuvable'); err.status = 404; throw err;
+    }
+    return dispute;
+  }
+
+  /**
    * Mes litiges (membre)
    */
   async getMyDisputes(userId) {

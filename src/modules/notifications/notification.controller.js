@@ -17,6 +17,14 @@ class NotificationController {
     } catch (err) { next(err); }
   }
 
+  /** GET /notifications/unread-count */
+  async getUnreadCount(req, res, next) {
+    try {
+      const result = await notifService.getUnreadCount(req.user.id);
+      return success(res, result);
+    } catch (err) { next(err); }
+  }
+
   /** PATCH /notifications/read-all */
   async markAllRead(req, res, next) {
     try {

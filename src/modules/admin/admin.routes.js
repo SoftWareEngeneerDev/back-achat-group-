@@ -231,6 +231,7 @@ router.get('/suppliers', controller.getSuppliers.bind(controller));
  *       200: { description: Fournisseur approuvé/rejeté — notifié par SMS et email }
  *       409: { description: Fournisseur déjà traité }
  */
+router.get('/suppliers/:id', [idParam], validate, controller.getSupplierById.bind(controller));
 router.patch('/suppliers/:id/validate', [idParam, ...approvedValidator], validate, controller.validateSupplier.bind(controller));
 
 /**
@@ -538,5 +539,19 @@ router.get('/audit-logs', controller.getAuditLogs.bind(controller));
  *       200: { description: Export initié }
  */
 router.post('/backup/export', controller.exportGDPR.bind(controller));
+
+router.get('/withdrawals',
+  controller.getWithdrawals.bind(controller)
+);
+
+router.patch('/withdrawals/:id/process',
+  [
+    idParam,
+    body('approved').isBoolean().withMessage('approved (boolean) requis'),
+    body('reason').optional().isString().trim(),
+  ],
+  validate,
+  controller.processWithdrawal.bind(controller)
+);
 
 module.exports = router;

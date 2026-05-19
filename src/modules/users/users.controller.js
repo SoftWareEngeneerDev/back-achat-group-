@@ -101,6 +101,18 @@ class UsersController {
     } catch (err) { next(err); }
   }
 
+  /** POST /users/me/password */
+  async changePassword(req, res, next) {
+    try {
+      await usersService.changePassword(
+        req.user.id,
+        req.body.currentPassword,
+        req.body.newPassword,
+      );
+      return success(res, null, 'Mot de passe modifié avec succès. Veuillez vous reconnecter.');
+    } catch (err) { next(err); }
+  }
+
   /** GET /supplier/me */
   async getSupplierProfile(req, res, next) {
     try {

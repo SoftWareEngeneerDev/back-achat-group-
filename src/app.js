@@ -123,12 +123,12 @@ app.use(`${V1}/auth`,          authRoutes);
 app.use(V1,                    usersRoutes);
 app.use(V1,                    productsRoutes);
 app.use(V1,                    groupsRoutes);
-app.use(`${V1}/payments`,      paymentsRoutes);
+app.use(V1,                    paymentsRoutes);
 app.use(V1,                    ordersRoutes);
 app.use(V1,                    uploadRoutes);
 app.use(V1,                    notificationsRoutes);
 app.use(V1,                    reviewsRoutes);
-app.use(`${V1}/disputes`,      disputesRoutes);
+app.use(V1,                    disputesRoutes);
 app.use(`${V1}/admin`,         adminRoutes);
 
 // ============================================================

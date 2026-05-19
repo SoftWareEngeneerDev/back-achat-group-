@@ -15,6 +15,13 @@ class DisputesController {
     } catch (err) { next(err); }
   }
 
+  async getDisputeById(req, res, next) {
+    try {
+      const dispute = await disputesService.getDisputeById(req.params.id, req.user.id);
+      return success(res, dispute);
+    } catch (err) { next(err); }
+  }
+
   async getMyDisputes(req, res, next) {
     try {
       const disputes = await disputesService.getMyDisputes(req.user.id);

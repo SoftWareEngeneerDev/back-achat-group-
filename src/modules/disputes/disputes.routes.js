@@ -84,6 +84,11 @@ router.post('/disputes', authenticate,
  */
 router.get('/disputes/me', authenticate, controller.getMyDisputes.bind(controller));
 
+router.get('/disputes/:id', authenticate,
+  [param('id').notEmpty().withMessage('ID litige requis')],
+  validate, controller.getDisputeById.bind(controller)
+);
+
 /**
  * @swagger
  * /admin/disputes:

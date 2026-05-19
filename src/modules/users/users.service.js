@@ -3,6 +3,7 @@
 // Djula Market — Burkina Faso
 // ============================================================
 
+const bcrypt = require('bcrypt');
 const prisma = require('../../config/database');
 const path   = require('path');
 const fs     = require('fs');
@@ -233,7 +234,12 @@ class UsersService {
   async getMemberStats(userId) {
     const [groupCount, orderCount] = await Promise.all([
       prisma.groupMember.count({ where: { userId } }),
-      prisma.order.count({ where: { userId, status: 'DELIVERED' } }).catch(() => 0),
+      prisma.order.count({
+        where: {
+          status: 'DELIVERED',
+          group : { members: { some: { userId, status: { in: ['ACTIVE', 'PAID'] } } } },
+        },
+      }).catch(() => 0),
     ]);
 
     return {
@@ -311,6 +317,30 @@ class UsersService {
       data : { docsUrls: { push: urls } },
     });
     return { urls, docsUrls: updated.docsUrls };
+  }
+
+  async changePassword(userId, currentPassword, newPassword) {
+    const user = await prisma.user.findUnique({
+      where : { id: userId },
+      select: { id: true, passwordHash: true },
+    });
+    if (!user) {
+      const err = new Error('Utilisateur introuvable');
+      err.status = 404; throw err;
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) {
+      const err = new Error('Mot de passe actuel incorrect');
+      err.status = 401; throw err;
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+      prisma.session.deleteMany({ where: { userId } }),
+    ]);
   }
 
   async deleteSupplierDocument(userId, url) {

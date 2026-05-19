@@ -129,6 +129,74 @@ class AdminService {
     return { data, total, page, limit };
   }
 
+  async getSupplierById(supplierId) {
+    const supplier = await prisma.supplier.findUnique({
+      where  : { id: supplierId },
+      include: {
+        user  : { select: { id: true, name: true, phone: true, email: true, city: true, status: true, createdAt: true } },
+        _count: { select: { products: true, groups: true } },
+      },
+    });
+    if (!supplier) {
+      const err = new Error('Fournisseur introuvable'); err.status = 404; throw err;
+    }
+    return supplier;
+  }
+
+  async getWithdrawals(query) {
+    const { page, limit, skip } = getPagination(query);
+    const { status } = query;
+    const where = status && status !== 'ALL' ? { status } : {};
+
+    const [data, total] = await Promise.all([
+      prisma.withdrawalRequest.findMany({
+        where,
+        skip, take: limit,
+        include: {
+          supplier: {
+            select: { id: true, companyName: true, user: { select: { name: true, phone: true } } },
+          },
+        },
+        orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+      }),
+      prisma.withdrawalRequest.count({ where }),
+    ]);
+    return { data, total, page, limit };
+  }
+
+  async processWithdrawal(withdrawalId, adminId, { approved, reason = null }) {
+    const withdrawal = await prisma.withdrawalRequest.findUnique({
+      where  : { id: withdrawalId },
+      include: { supplier: { select: { userId: true } } },
+    });
+    if (!withdrawal) {
+      const err = new Error('Demande de retrait introuvable'); err.status = 404; throw err;
+    }
+    if (withdrawal.status !== 'PENDING') {
+      const err = new Error('Cette demande a déjà été traitée'); err.status = 409; throw err;
+    }
+
+    const status  = approved ? 'COMPLETED' : 'REJECTED';
+    const updated = await prisma.withdrawalRequest.update({
+      where: { id: withdrawalId },
+      data : { status },
+    });
+
+    if (withdrawal.supplier?.userId) {
+      await notificationService.notify(withdrawal.supplier.userId, {
+        type    : 'SYSTEM',
+        title   : approved ? '💰 Retrait approuvé' : '❌ Retrait refusé',
+        body    : approved
+          ? `Votre retrait de ${withdrawal.amount.toLocaleString('fr-FR')} XOF a été approuvé.`
+          : `Votre retrait de ${withdrawal.amount.toLocaleString('fr-FR')} XOF a été refusé.${reason ? ` Raison : ${reason}` : ''}`,
+        channels: ['sms'],
+      });
+    }
+
+    await auditLog(adminId, approved ? 'WITHDRAWAL_APPROVED' : 'WITHDRAWAL_REJECTED', 'WithdrawalRequest', withdrawalId, { reason, amount: withdrawal.amount });
+    return updated;
+  }
+
   async validateSupplier(supplierId, adminId, approved, reason = null) {
     const supplier = await prisma.supplier.findUnique({
       where  : { id: supplierId },

@@ -60,6 +60,11 @@ router.get('/notifications',
  *       200: { description: Toutes les notifications marquées comme lues }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
+router.get('/notifications/unread-count',
+  authenticate,
+  controller.getUnreadCount.bind(controller)
+);
+
 router.patch('/notifications/read-all',
   authenticate,
   controller.markAllRead.bind(controller)

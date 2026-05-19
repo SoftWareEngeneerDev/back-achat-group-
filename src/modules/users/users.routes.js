@@ -97,6 +97,16 @@ router.get   ('/users/me', authenticate, controller.getProfile.bind(controller))
 router.put   ('/users/me', authenticate, sanitizeBody, profileValidators, validate, controller.updateProfile.bind(controller));
 router.delete('/users/me', authenticate, controller.deleteAccount.bind(controller));
 
+router.post('/users/me/password',
+  authenticate,
+  [
+    body('currentPassword').notEmpty().withMessage('Mot de passe actuel requis'),
+    body('newPassword').isLength({ min: 8 }).withMessage('Nouveau mot de passe minimum 8 caractères'),
+  ],
+  validate,
+  controller.changePassword.bind(controller),
+);
+
 /**
  * @swagger
  * /users/me/avatar:

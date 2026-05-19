@@ -39,20 +39,27 @@ class ReviewsService {
   }
 
   /**
-   * Laisser un avis (uniquement après réception du produit)
+   * Laisser un avis (uniquement après livraison confirmée)
    */
   async createReview(userId, productId, { rating, comment }) {
-    // Vérifier que l'utilisateur a reçu ce produit
-    const delivered = await prisma.groupMember.findFirst({
-      where: {
-        userId,
-        status: 'PAID',
-        group : { productId, status: 'CLOSED' },
-      },
+    // Vérifier que l'utilisateur a participé à un groupe pour ce produit
+    const membership = await prisma.groupMember.findFirst({
+      where  : { userId, status: 'PAID', group: { productId, status: 'CLOSED' } },
+      include: { group: { select: { id: true } } },
     });
 
-    if (!delivered) {
+    if (!membership) {
       const err = new Error('Vous devez avoir reçu ce produit pour laisser un avis');
+      err.status = 403; throw err;
+    }
+
+    // Vérifier que la commande du groupe est bien DELIVERED
+    const order = await prisma.order.findFirst({
+      where: { groupId: membership.group.id, status: 'DELIVERED' },
+    });
+
+    if (!order) {
+      const err = new Error('Vous devez avoir reçu votre commande avant de laisser un avis');
       err.status = 403; throw err;
     }
 
