@@ -218,6 +218,35 @@ class AdminController {
       return success(res, result, 'Export GDPR initié');
     } catch (err) { next(err); }
   }
+
+  // ── Livreurs ──────────────────────────────────────────────────
+  async createDeliverer(req, res, next) {
+    try {
+      const deliverer = await adminService.createDeliverer(req.body);
+      return success(res, deliverer, 'Livreur créé avec succès');
+    } catch (err) { next(err); }
+  }
+
+  async getDeliverers(req, res, next) {
+    try {
+      const data = await adminService.getDeliverers(req.query.status);
+      return success(res, data);
+    } catch (err) { next(err); }
+  }
+
+  async updateDeliverer(req, res, next) {
+    try {
+      const deliverer = await adminService.updateDeliverer(req.params.id, req.body);
+      return success(res, deliverer, 'Livreur mis à jour');
+    } catch (err) { next(err); }
+  }
+
+  async toggleDelivererStatus(req, res, next) {
+    try {
+      const deliverer = await adminService.toggleDelivererStatus(req.params.id);
+      return success(res, deliverer, `Statut mis à jour : ${deliverer.status}`);
+    } catch (err) { next(err); }
+  }
 }
 
 module.exports = new AdminController();

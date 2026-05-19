@@ -556,4 +556,42 @@ router.patch('/withdrawals/:id/process',
   controller.processWithdrawal.bind(controller)
 );
 
+// ── Livreurs ──────────────────────────────────────────────────
+router.post('/deliverers',
+  [
+    body('name').trim().notEmpty().withMessage('Nom requis'),
+    body('phone').trim().notEmpty().withMessage('Téléphone requis'),
+    body('zone').trim().notEmpty().withMessage('Zone requise'),
+    body('tarif').optional().isFloat({ min: 0 }),
+    body('description').optional().isString().trim(),
+    body('photoUrl').optional().isString().trim(),
+  ],
+  validate,
+  controller.createDeliverer.bind(controller)
+);
+
+router.get('/deliverers',
+  controller.getDeliverers.bind(controller)
+);
+
+router.patch('/deliverers/:id',
+  [
+    idParam,
+    body('name').optional().trim().notEmpty(),
+    body('phone').optional().trim().notEmpty(),
+    body('zone').optional().trim().notEmpty(),
+    body('tarif').optional().isFloat({ min: 0 }),
+    body('description').optional().isString().trim(),
+    body('photoUrl').optional().isString().trim(),
+  ],
+  validate,
+  controller.updateDeliverer.bind(controller)
+);
+
+router.patch('/deliverers/:id/toggle-status',
+  [idParam],
+  validate,
+  controller.toggleDelivererStatus.bind(controller)
+);
+
 module.exports = router;

@@ -641,6 +641,33 @@ class AdminService {
     await auditLog(adminId, 'GDPR_EXPORT', 'System', 'system', { counts: { users, groups, payments } });
     return { exportedAt: new Date().toISOString(), counts: { users, groups, payments } };
   }
+
+  // ── Livreurs ──────────────────────────────────────────────────
+  async createDeliverer(data) {
+    return prisma.deliverer.create({ data });
+  }
+
+  async getDeliverers(status) {
+    const where = {};
+    if (status && status !== 'all') where.status = status.toUpperCase();
+    return prisma.deliverer.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async updateDeliverer(id, data) {
+    const deliverer = await prisma.deliverer.findUnique({ where: { id } });
+    if (!deliverer) { const err = new Error('Livreur introuvable'); err.status = 404; throw err; }
+    return prisma.deliverer.update({ where: { id }, data });
+  }
+
+  async toggleDelivererStatus(id) {
+    const deliverer = await prisma.deliverer.findUnique({ where: { id } });
+    if (!deliverer) { const err = new Error('Livreur introuvable'); err.status = 404; throw err; }
+    const newStatus = deliverer.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+    return prisma.deliverer.update({ where: { id }, data: { status: newStatus } });
+  }
 }
 
 module.exports = new AdminService();

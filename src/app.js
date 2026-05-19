@@ -27,6 +27,7 @@ const reviewsRoutes       = require('./modules/reviews/reviews.routes');
 const disputesRoutes      = require('./modules/disputes/disputes.routes');
 const adminRoutes         = require('./modules/admin/admin.routes');
 const uploadRoutes        = require('./modules/upload/upload.routes');
+const deliverersRoutes    = require('./modules/deliverers/deliverers.routes');
 const swaggerSpec         = require('./config/swagger');
 
 const app        = express();
@@ -130,6 +131,7 @@ app.use(V1,                    notificationsRoutes);
 app.use(V1,                    reviewsRoutes);
 app.use(V1,                    disputesRoutes);
 app.use(`${V1}/admin`,         adminRoutes);
+app.use(V1,                    deliverersRoutes);
 
 // ============================================================
 // GESTION ERREURS
