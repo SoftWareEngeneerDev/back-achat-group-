@@ -530,6 +530,62 @@ class AdminService {
     return updated;
   }
 
+  async completePayout(paymentId, adminId) {
+    const payment = await prisma.payment.findUnique({
+      where  : { id: paymentId },
+      include: { supplier: { include: { user: true } } },
+    });
+    if (!payment || payment.type !== 'SUPPLIER_PAYOUT') {
+      const err = new Error('Paiement introuvable'); err.status = 404; throw err;
+    }
+    if (payment.status === 'COMPLETED') {
+      const err = new Error('Ce virement a déjà été complété'); err.status = 409; throw err;
+    }
+    const updated = await prisma.payment.update({
+      where: { id: paymentId },
+      data : { status: 'COMPLETED', processedAt: new Date() },
+    });
+    await auditLog(adminId, 'PAYOUT_COMPLETED', 'Payment', paymentId);
+    return updated;
+  }
+
+  async failGroup(groupId, adminId) {
+    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) { const err = new Error('Groupe introuvable'); err.status = 404; throw err; }
+    if (!['OPEN', 'THRESHOLD_REACHED'].includes(group.status)) {
+      const err = new Error('Seuls les groupes ouverts peuvent être marqués échoués'); err.status = 409; throw err;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.group.update({ where: { id: groupId }, data: { status: 'FAILED' } });
+      await tx.groupMember.updateMany({
+        where: { groupId, status: 'ACTIVE' },
+        data : { status: 'CANCELLED', cancelledAt: new Date() },
+      });
+      const payments = await tx.payment.findMany({
+        where: { groupId, type: 'DEPOSIT', status: 'ESCROWED' },
+      });
+      for (const p of payments) {
+        await tx.payment.update({ where: { id: p.id }, data: { status: 'REFUNDED', processedAt: new Date() } });
+      }
+    });
+
+    const members = await prisma.groupMember.findMany({
+      where : { groupId },
+      select: { userId: true },
+    });
+    for (const m of members) {
+      await notificationService.notify(m.userId, {
+        type    : 'GROUP_FAILED',
+        title   : 'Groupe annulé — remboursement en cours',
+        body    : 'Votre groupe a été marqué comme échoué. Votre acompte sera remboursé sous 48h.',
+        channels: ['sms'],
+      }).catch(() => {});
+    }
+    await auditLog(adminId, 'GROUP_FAILED', 'Group', groupId);
+    return { success: true };
+  }
+
   // ── ANALYTICS ────────────────────────────────────────────────
 
   async getDashboard() {

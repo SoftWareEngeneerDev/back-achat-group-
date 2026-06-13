@@ -206,43 +206,7 @@ router.post(
   controller.cinetpayWebhook.bind(controller),
 );
 
-// ============================================================
-// ADMIN — Remboursements manuels (UC32)
-// ============================================================
-
-/**
- * @swagger
- * /admin/payments/refund:
- *   post:
- *     tags: [Payments]
- *     summary: UC32 — Rembourser manuellement un paiement (Admin)
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [paymentId, reason]
- *             properties:
- *               paymentId: { type: string, format: uuid }
- *               reason:    { type: string, example: "Groupe annulé par admin" }
- *     responses:
- *       200: { description: Remboursement effectué, utilisateur notifié }
- *       409: { description: Paiement déjà remboursé }
- */
-router.post(
-  '/admin/payments/refund',
-  authenticate,
-  requireAdmin,
-  [
-    body('paymentId').notEmpty().withMessage('ID du paiement requis'),
-    body('reason').notEmpty().withMessage('Raison du remboursement requise'),
-  ],
-  validate,
-  controller.refund.bind(controller),
-);
+// NOTE: POST /admin/payments/refund est géré exclusivement dans admin.routes.js
 
 // ============================================================
 // 🧪 SIMULATION — DEV UNIQUEMENT

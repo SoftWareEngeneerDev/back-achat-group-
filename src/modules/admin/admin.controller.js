@@ -175,6 +175,20 @@ class AdminController {
     } catch (err) { next(err); }
   }
 
+  async completePayout(req, res, next) {
+    try {
+      const result = await adminService.completePayout(req.params.id, req.user.id);
+      return success(res, result, 'Virement fournisseur complété');
+    } catch (err) { next(err); }
+  }
+
+  async failGroup(req, res, next) {
+    try {
+      const result = await adminService.failGroup(req.params.id, req.user.id);
+      return success(res, result, 'Groupe marqué comme échoué — membres notifiés');
+    } catch (err) { next(err); }
+  }
+
   // ── Analytics ──────────────────────────────────────────────
   async getDashboard(req, res, next) {
     try {

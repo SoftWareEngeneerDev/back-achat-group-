@@ -353,6 +353,8 @@ router.get('/groups/:id', [idParam], validate, controller.getGroupById.bind(cont
 
 router.patch('/groups/:id/close', [idParam, body('reason').optional().isString().trim()], validate, controller.closeGroup.bind(controller));
 
+router.patch('/groups/:id/fail', [idParam], validate, controller.failGroup.bind(controller));
+
 /**
  * @swagger
  * /admin/disputes:
@@ -446,6 +448,11 @@ router.get('/payments', controller.getAllPayments.bind(controller));
 router.post('/payments/refund',
   [body('paymentId').notEmpty(), body('reason').notEmpty().trim()],
   validate, controller.refundPayment.bind(controller)
+);
+
+router.patch('/payments/:id/complete-payout',
+  [idParam],
+  validate, controller.completePayout.bind(controller)
 );
 
 /**

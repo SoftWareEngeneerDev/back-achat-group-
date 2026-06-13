@@ -44,7 +44,7 @@ const PROFILE_SELECT = {
       // ❌ rating, reviewCount, successRate n'existent pas sur Supplier
     },
   },
-  _count: { select: { groupMembers: true, reviews: true } },
+  _count: { select: { groupMembers: true, reviews: true, referrals: true } },
 };
 
 const UPDATE_SELECT = {
